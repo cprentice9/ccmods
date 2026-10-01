@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { checklist, describeCommand, frame, status, svg, ticker } from './register.tsx'
+import { checklist, describeCommand, frame, status, svg, ticker, workingDots } from './register.tsx'
 
 const ORANGE = 0xd77757
 const DEFAULT = 0x01000000
@@ -71,6 +71,17 @@ const mount = ($: Engine, surface: 'terminal' | 'desktop' | 'vscode', bodyColumn
     props: { hasSurvey: false, maxRows: 10, bodyColumns } as never,
     viewport: { columns: 120, rows: 40 },
   })
+
+// An Svg in a drawing by its alt text: the query finds by type, key or text,
+// and an Svg carries none that tells two apart, so walk the tree from its root.
+type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+const svgByAlt = async (ui: { find: (q: { type: string }) => Promise<Node | undefined> }, alt: string) => {
+  const walk = (node: Node): Node[] =>
+    [...(node.type === 'Svg' && node.props?.alt === alt ? [node] : []),
+      ...(node.children ?? []).flatMap(child => (typeof child === 'object' && child ? walk(child as Node) : []))]
+  const root = await ui.find({ type: 'Box' })
+  return root ? walk(root)[0] : undefined
+}
 
 const complete = ($: Engine, turnId: string, agentId?: string) =>
   $.turn.complete({ answer: 'ok', durationMs: 1000, isAborted: false, turnId, agentId, reason: 'answer' })
@@ -186,7 +197,7 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
   engine(on)
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
-  const drawn = await desktop.find({ type: 'Svg' })
+  const drawn = await svgByAlt(desktop, 'Clawd typing on a laptop while Claude works')
   expect(drawn?.props).toMatchObject({ source: svg(0, 28, 0, true), width: 56, height: 28 })
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
@@ -309,7 +320,15 @@ test("the app's spinner status shows just left of him: elapsed time and what it 
   await spinner.unmount()
   clock.now = 21_400
   const ui = await mount($, 'desktop')
-  expect(await ui.find({ type: 'Text', text: /^\u2022 {2} 20s \u00b7 Thinking$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '20s \u00b7 Thinking' })).toBeDefined()
+  expect((await svgByAlt(ui, 'Working'))?.props.source).toBe(workingDots(0))
   await ui.unmount()
   await complete($, 't1')
+})
+
+test('the working mark is four orange dots in a square, turning 30 degrees a frame', () => {
+  expect(workingDots(0).split('<circle').length - 1).toBe(4)
+  expect(workingDots(0)).toContain('rotate(0 6 6)')
+  expect(workingDots(1)).toContain('rotate(30 6 6)')
+  expect(workingDots(12)).toContain('rotate(0 6 6)')
 })

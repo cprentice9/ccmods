@@ -186,6 +186,14 @@ export const checklist = (list: WorkingTasks) => {
 export const status = (seconds: number, shown?: { word: string; message: string | null; mode: string }) =>
   `${seconds}s \u00b7 ${shown?.mode === 'thinking' ? 'Thinking' : (shown?.message ?? shown?.word ?? 'Working')}`
 
+// The working mark beside the status: four orange dots in a square, turned
+// 30 degrees a frame, a full turn about every two seconds.
+export const workingDots = (t: number) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12">`
+  + `<g transform="rotate(${mod(t * 30, 360)} 6 6)" fill="#${ORANGE.toString(16)}">`
+  + [[3.2, 3.2], [8.8, 3.2], [3.2, 8.8], [8.8, 8.8]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.6"/>`).join('')
+  + '</g></svg>'
+
 // "Bash npm test", "Edit register.tsx": the tool and its main argument, a file
 // by its name, cut to one short line.
 export const describeCommand = (call: Record<string, unknown>) => {
@@ -333,12 +341,6 @@ export const register: Register = on => {
     const recent = await read($, commands)
     const { Box, Text } = $.ui.resolve(e)
     const seconds = Math.max(0, Math.floor(((await $.clock.now()) - startedAt) / 1000))
-    const statusLine = hasLeader && (
-      <Text wrap="truncate">
-        <Text color={`#${ORANGE.toString(16)}`}>{'\u2022'.repeat(1 + mod(tick, 3)).padEnd(3)}</Text>
-        <Text dimColor> {status(seconds, spinner)}</Text>
-      </Text>
-    )
     const task = progress && (
       <Text wrap="truncate">{progress.now ? `${progress.now}  ` : ''}<Text dimColor>{progress.count}</Text></Text>
     )
@@ -346,6 +348,12 @@ export const register: Register = on => {
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
       const { Svg } = $.ui.resolve(e)
       const scene = sceneColumns(minis)
+      const statusLine = hasLeader && (
+        <Box flexDirection="row" alignItems="center">
+          <Svg source={workingDots(tick)} width={12} height={12} alt="Working" />
+          <Box marginLeft={1}><Text dimColor wrap="truncate">{status(seconds, spinner)}</Text></Box>
+        </Box>
+      )
       return (
         <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" width={columns}>
           <Box flexGrow={1} flexShrink={1} marginRight={3}>
