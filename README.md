@@ -17,7 +17,7 @@ For one session:
 claude --plugin-dir ~/Documents/GitHub/ccmods/prose-guard
 ```
 
-For every session, including ones the desktop app starts, list the folders in `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`, separated by `:`.
+For every session, including ones the desktop app starts, list the folders in `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`, separated by `:`. Set `CLAUDE_CODE_PLUGIN_DIR_WATCH` to `1` in the same block, or a desktop session keeps the code it loaded at start and never picks up a change.
 
 ## Checking a mod
 
