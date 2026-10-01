@@ -30,9 +30,9 @@ const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
 const LAPTOP = '#9a9c9f'
 // The desktop Clawd, drawn the way the app's own one is: seen from the side,
-// facing left, his head over his face with one eye (E, a hole), and two thin
-// arms, front (F) and back (B), bending down and left from his body to the
-// keys of a laptop (g) whose lid tilts back and whose base sits on the ground. His four legs
+// facing left, his head over his face with one eye (E, a hole), at a laptop
+// (g) whose lid tilts back and whose base sits on the ground. His legs stand
+// in two pairs, each foot a step back. His four legs
 // bend a little at the knee. 28 cells by 14.
 const SIDE = [
   '...........OOOOOOOOOOOOOOOO.',
@@ -42,14 +42,19 @@ const SIDE = [
   '.............OOOOOOEEOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
-  '..........FOOOOOOOOOOOOOOOO.',
-  'g........F.OOOOOOOOOOOOOOOO.',
-  'gg......F..OOOOOOOOOOOOOOOO.',
-  '.gg....F..BOOOOOOOOOOOOOOOO.',
-  '..gg..F..B..OO..OO..OO..OO..',
-  '...ggg......OOO.OOO.OOO.OOO.',
-  '....ggggggg..OO..OO..OO..OO.',
+  '...........OOOOOOOOOOOOOOOO.',
+  'g..........OOOOOOOOOOOOOOOO.',
+  'gg.........OOOOOOOOOOOOOOOO.',
+  '.gg........OOOOOOOOOOOOOOOO.',
+  '..gg........OO.OO....OO.OO..',
+  '...ggg......OO.OO....OO.OO..',
+  '....ggggggg..OO.OO....OO.OO.',
 ]
+// His hands: two small squares circling in front of him, half a turn apart,
+// so one is up while the other presses the keys. Each entry is a square's
+// top left cell, one per frame.
+const HAND = 3
+const HAND_PATH = [[8, 6], [7, 8], [8, 10], [9, 8]] as const
 const SIDE_COLUMNS = SIDE[0]!.length
 const SIDE_ROWS = SIDE.length
 const MINI_SCALE = 0.6
@@ -135,17 +140,19 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
 }
 
 // One Clawd at his laptop as SVG cells, scaled by `s` (a mini is smaller).
-// His hands take turns pressing a cell down onto the keys as he types, and
-// he blinks every 16th frame.
+// His hands circle as he types, and he blinks every 16th frame.
 const clawdAtLaptop = (left: number, top: number, s: number, t: number) => {
   const orange = `#${ORANGE.toString(16)}`
-  const pressed = mod(t, 2) === 0 ? 'F' : 'B'
+  const cell = (x: number, y: number, fill: string) =>
+    `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="${fill}"/>`
   const cells: string[] = []
   SIDE.forEach((row, y) => [...row].forEach((ch, x) => {
     if (ch === '.' || (ch === 'E' && mod(t, 16) !== 15)) return
-    const dip = ch === pressed ? 1 : 0
-    cells.push(`<rect x="${x}" y="${y + dip}" width="1.02" height="1.02" fill="${ch === 'g' ? LAPTOP : orange}"/>`)
+    cells.push(cell(x, y, ch === 'g' ? LAPTOP : orange))
   }))
+  for (const [hx, hy] of [HAND_PATH[mod(t, 4)]!, HAND_PATH[mod(t + 2, 4)]!]) {
+    for (let dy = 0; dy < HAND; dy++) for (let dx = 0; dx < HAND; dx++) cells.push(cell(hx + dx, hy + dy, orange))
+  }
   return `<g transform="translate(${left} ${top}) scale(${s})">${cells.join('')}</g>`
 }
 

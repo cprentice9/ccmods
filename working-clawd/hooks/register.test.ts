@@ -208,23 +208,24 @@ test('the desktop scene: he sits at the right end at his laptop, minis to his le
   expect(cell(source, 11, 0)).toBe('#d77757')
   expect(cell(source, 19, 3)).toBeUndefined()
   expect(cell(source, 4, 13)).toBe('#9a9c9f')
-  // His legs bend a little at the knee: the back leg steps out a cell at
-  // row 12 and comes down a cell further back.
-  expect(cell(source, 24, 11)).toBe('#d77757')
-  expect(cell(source, 26, 11)).toBeUndefined()
-  expect(cell(source, 26, 12)).toBe('#d77757')
-  expect(cell(source, 24, 13)).toBeUndefined()
-  expect(cell(source, 26, 13)).toBe('#d77757')
+  // His legs stand in two pairs with a gap between, each foot a step back.
+  expect(cell(source, 12, 11)).toBe('#d77757')
+  expect(cell(source, 14, 11)).toBeUndefined()
+  expect(cell(source, 15, 11)).toBe('#d77757')
+  for (const x of [17, 18, 19, 20]) expect(cell(source, x, 11)).toBeUndefined()
+  expect(cell(source, 21, 11)).toBe('#d77757')
+  expect(cell(source, 12, 13)).toBeUndefined()
+  expect(cell(source, 13, 13)).toBe('#d77757')
   // He blinks every 16th frame.
   expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
-  // His two thin arms bend down and left to the keys and take turns pressing
-  // a cell down: on even frames the front arm reaches the laptop's base.
-  expect(cell(source, 6, 12)).toBe('#d77757')
-  expect(cell(source, 9, 11)).toBe('#d77757')
-  expect(cell(source, 9, 12)).toBeUndefined()
-  expect(cell(svg(1, 40), 6, 11)).toBe('#d77757')
-  expect(cell(svg(1, 40), 6, 12)).toBeUndefined()
-  expect(cell(svg(1, 40), 9, 12)).toBe('#d77757')
+  // His hands circle half a turn apart: on frame 0 one is up and the other
+  // presses the laptop's base; on frame 1 both swing to the middle.
+  expect(cell(source, 8, 6)).toBe('#d77757')
+  expect(cell(source, 8, 12)).toBe('#d77757')
+  expect(cell(source, 8, 9)).toBeUndefined()
+  expect(cell(svg(1, 40), 7, 9)).toBe('#d77757')
+  expect(cell(svg(1, 40), 8, 12)).toBeUndefined()
+  expect(cell(svg(2, 40), 8, 12)).toBe('#d77757')
   // Each mini is smaller with its own laptop; one that does not fit is left out.
   const sprites = (markup: string) => markup.split('<g transform').length - 1
   expect(sprites(svg(0, 40, 1))).toBe(1)
