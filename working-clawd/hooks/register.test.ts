@@ -7,11 +7,26 @@ import { frame } from './register.tsx'
 const ORANGE = 0xd77757
 const DEFAULT = 0x01000000
 
-// Cell (x, row) of a frame as [codePoint, foreground, background].
+const COLUMNS = 30
+
+// The words of a frame `COLUMNS` wide, and cell (x, row) of it as
+// [codePoint, foreground, background].
+const words = (cells: string) => new Uint32Array(Uint8Array.fromBase64(cells).buffer)
 const cell = (cells: string, x: number, row: number) => {
-  const bytes = Uint8Array.fromBase64(cells)
-  const words = new Uint32Array(bytes.buffer)
-  return [...words.slice((row * 32 + x) * 3, (row * 32 + x) * 3 + 3)]
+  const i = (row * COLUMNS + x) * 3
+  return [...words(cells).slice(i, i + 3)]
+}
+
+// The leftmost column with any orange in it: where Clawd's left hand is.
+const leftmost = (cells: string) => {
+  const w = words(cells)
+  for (let x = 0; x < COLUMNS; x++) {
+    for (let row = 0; row < 3; row++) {
+      const i = (row * COLUMNS + x) * 3
+      if (w[i + 1] === ORANGE || w[i + 2] === ORANGE) return x
+    }
+  }
+  return -1
 }
 
 // Stands in for the engine beneath the plugin. The animation timer's first
@@ -49,39 +64,39 @@ const mount = ($: Engine, surface: 'terminal' | 'desktop', bodyColumns = 100) =>
 const complete = ($: Engine, turnId: string, agentId?: string) =>
   $.turn.complete({ answer: 'ok', durationMs: 1000, isAborted: false, turnId, agentId, reason: 'answer' })
 
-test('a frame is 32 by 4 cells of half blocks, with Clawd in orange', () => {
-  const words = new Uint32Array(Uint8Array.fromBase64(frame(0)).buffer)
-  expect(words.length).toBe(32 * 4 * 3)
-  for (let i = 0; i < words.length; i += 3) expect([0x20, 0x2580, 0x2584]).toContain(words[i])
-  // Clawd's head starts on the second row of cells.
-  expect(cell(frame(0), 7, 0)).toEqual([0x20, DEFAULT, DEFAULT])
-  expect(cell(frame(0), 7, 1)).toEqual([0x2580, ORANGE, ORANGE])
+test('a frame spans the band in three rows of half blocks', () => {
+  const w = words(frame(0, COLUMNS))
+  expect(w.length).toBe(COLUMNS * 3 * 3)
+  for (let i = 0; i < w.length; i += 3) expect([0x20, 0x2580, 0x2584]).toContain(w[i])
 })
 
-test('the hands take turns striking the keys, and each keystroke types a pixel', () => {
-  // A hand is one orange pixel at the bottom of its cell, raised or struck.
-  const hand = [0x2584, ORANGE, DEFAULT]
-  const lit = [0x2580, 0xf2f2f2, 0x7d828c]
-  const dark = [0x2580, 0xb4b8bf, 0x7d828c]
-  // Even frames: the left hand strikes and lights its key, the right is raised.
-  expect(cell(frame(0), 1, 2)).toEqual(hand)
-  expect(cell(frame(0), 1, 3)).toEqual(lit)
-  expect(cell(frame(0), 16, 1)).toEqual(hand)
-  expect(cell(frame(0), 16, 3)).toEqual(dark)
-  // Odd frames: the other way around.
-  expect(cell(frame(1), 16, 2)).toEqual(hand)
-  expect(cell(frame(1), 16, 3)).toEqual(lit)
-  expect(cell(frame(1), 1, 1)).toEqual(hand)
-  expect(cell(frame(1), 1, 3)).toEqual(dark)
-  // The first pixel of the bottom screen line appears on the first keystroke.
-  expect(cell(frame(0), 21, 2)[1]).toBe(0x1f2633)
-  expect(cell(frame(1), 21, 2)[1]).not.toBe(0x1f2633)
+test('Clawd walks a column per frame and turns around at each end', () => {
+  // His sprite is 18 wide, so in 30 columns he walks 12 each way.
+  expect(leftmost(frame(0, COLUMNS))).toBe(1)
+  expect(leftmost(frame(5, COLUMNS))).toBe(6)
+  expect(leftmost(frame(12, COLUMNS))).toBe(13)
+  expect(leftmost(frame(13, COLUMNS))).toBe(12)
+  expect(leftmost(frame(24, COLUMNS))).toBe(1)
 })
 
-test('Clawd blinks every 16th frame', () => {
-  // Left eye: a hole under the top of the head, filled while blinking.
-  expect(cell(frame(13), 5, 1)).toEqual([0x2580, ORANGE, DEFAULT])
-  expect(cell(frame(15), 5, 1)).toEqual([0x2580, ORANGE, ORANGE])
+test('every other frame he hops with his feet splayed', () => {
+  // The top of his head: one pixel down on a step, at the top on a hop.
+  expect(cell(frame(0, COLUMNS), 7, 0)).toEqual([0x2584, ORANGE, DEFAULT])
+  expect(cell(frame(1, COLUMNS), 8, 0)).toEqual([0x2580, ORANGE, ORANGE])
+  // A splayed foot on the bottom row while hopping.
+  expect(cell(frame(1, COLUMNS), 4, 2)).toEqual([0x2584, ORANGE, DEFAULT])
+})
+
+test('his eyes look the way he walks, and he blinks every 16th frame', () => {
+  const eye = [0x2584, ORANGE, DEFAULT]
+  // Walking right on frame 0: the eye sits one pixel right of the logo's.
+  expect(cell(frame(0, COLUMNS), 6, 1)).toEqual(eye)
+  expect(cell(frame(0, COLUMNS), 4, 1)).toEqual([0x2580, ORANGE, ORANGE])
+  // Walking left on frame 14: one pixel left of it.
+  expect(cell(frame(14, COLUMNS), 14, 1)).toEqual(eye)
+  // Frames 13 and 15 are hops while walking left: open eye, then a blink.
+  expect(cell(frame(13, COLUMNS), 15, 0)).toEqual([0x2580, ORANGE, DEFAULT])
+  expect(cell(frame(15, COLUMNS), 13, 0)).toEqual([0x2580, ORANGE, ORANGE])
 })
 
 test('the band shows Clawd only while a main turn runs', async ($, on) => {
@@ -93,7 +108,7 @@ test('the band shows Clawd only while a main turn runs', async ($, on) => {
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await complete($, 'sub-1', 'agent-1')
   ui = await mount($, 'terminal')
-  expect(await ui.find({ type: 'Raster' })).toBeDefined()
+  expect((await ui.find({ type: 'Raster' }))?.props).toMatchObject({ columns: 100, rows: 3 })
   await ui.unmount()
 
   await complete($, 't1')
@@ -108,8 +123,8 @@ test('each tick of the timer repaints the band with the next frame', async ($, o
   const ui = await mount($, 'terminal')
   tick()
   for (let i = 0; i < 50 && blits.length === 0; i++) await Promise.resolve()
-  expect(periods[0]).toBe(180)
-  expect(blits).toEqual([frame(1)])
+  expect(periods[0]).toBe(150)
+  expect(blits).toEqual([frame(1, 100)])
   await ui.unmount()
   await complete($, 't1')
 })

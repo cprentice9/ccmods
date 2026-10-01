@@ -4,103 +4,54 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { WorkingTurn } from '../types'
 
 const KEY = 'clawd'
-const WIDTH = 32
-const HEIGHT = 8
+const SPRITE = 18
+const MIN_COLUMNS = 24
+const MAX_COLUMNS = 512
+const HEIGHT = 6
 const ROWS = HEIGHT / 2
-const TICK_MS = 180
+const TICK_MS = 150
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 
 const CLEAR = -1
 const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
-const FRAME = 0x5c6370
-const SCREEN = 0x1f2633
-const BASE = 0xb4b8bf
-const KEY_LIT = 0xf2f2f2
-const EDGE = 0x7d828c
-const TEAL = 0x7fb4ca
-const LAVENDER = 0xb4a7d6
-const MUTED = 0x8a8f98
 
-// Clawd as the CLI logo draws him, eyes as holes. He sits behind the
-// keyboard, which hides his legs; his arms are drawn per frame.
-const BODY = [
-  '...OOOOOOOOOOOO',
-  '...OOEOOOOOOEOO',
-  '...OOOOOOOOOOOO',
-  '...OOOOOOOOOOOO',
-]
+// One frame as Raster cells, `columns` wide. Clawd, drawn as the CLI logo
+// draws him, walks one column per frame and turns around at each end. Every
+// other frame he hops, feet splayed; his eyes look the way he is walking, and
+// he blinks every 16th frame.
+export const frame = (t: number, columns: number) => {
+  const px = new Int32Array(columns * HEIGHT).fill(CLEAR)
+  const range = columns - SPRITE
+  const step = t % (2 * range)
+  const left = step <= range ? step : 2 * range - step
+  const facing = step < range ? 1 : -1
+  const isHop = t % 2 === 1
+  const top = isHop ? 0 : 1
+  const set = (x: number, y: number, color = ORANGE) => (px[y * columns + left + x] = color)
 
-// Lines of code on the screen: an indent, then runs of colored pixels.
-const CODE: [number, [number, number][]][] = [
-  [0, [[3, LAVENDER], [6, TEAL]]],
-  [1, [[4, ORANGE], [3, MUTED]]],
-  [1, [[2, LAVENDER], [5, TEAL], [1, MUTED]]],
-  [2, [[6, ORANGE]]],
-  [1, [[3, TEAL], [4, MUTED]]],
-  [0, [[1, LAVENDER]]],
-  [0, [[5, ORANGE], [2, MUTED]]],
-  [1, [[7, TEAL]]],
-]
-const LINE = 10
-
-const linePixels = (i: number) => {
-  const [indent, runs] = CODE[i % CODE.length]!
-  const px: number[] = Array(indent).fill(SCREEN)
-  for (const [n, color] of runs) px.push(...Array(n).fill(color), SCREEN)
-  return px.slice(0, LINE)
-}
-
-// One frame as Raster cells. The hands take turns: one raised, the other
-// striking the keyboard, where the key it hits lights up. Each keystroke adds
-// a pixel to the bottom line of the screen, a full line scrolls up, and
-// Clawd blinks every 16th frame.
-export const frame = (t: number) => {
-  const px = new Int32Array(WIDTH * HEIGHT).fill(CLEAR)
-  const set = (x: number, y: number, color: number) => (px[y * WIDTH + x] = color)
-
-  BODY.forEach((row, y) => [...row].forEach((ch, x) => {
-    if (ch === 'O' || (ch === 'E' && t % 16 === 15)) set(x, y + 2, ORANGE)
-  }))
-  for (let x = 0; x < WIDTH; x++) {
-    set(x, 6, BASE)
-    set(x, 7, EDGE)
-  }
-  const [down, up] = t % 2 === 0 ? [1, 16] : [16, 1]
-  set(2, 4, ORANGE)
-  set(15, 4, ORANGE)
-  set(up, 3, ORANGE)
-  set(down, 5, ORANGE)
-  set(down, 6, KEY_LIT)
-
-  for (let x = 20; x < WIDTH; x++) {
-    set(x, 0, FRAME)
-    set(x, 5, FRAME)
-  }
-  for (let y = 1; y < 5; y++) {
-    set(20, y, FRAME)
-    set(WIDTH - 1, y, FRAME)
-    for (let x = 21; x < WIDTH - 1; x++) set(x, y, SCREEN)
-  }
-  const line = Math.floor(t / LINE)
   for (let row = 0; row < 4; row++) {
-    const i = line - 3 + row
-    if (i < 0) continue
-    const code = linePixels(i).slice(0, row === 3 ? t % LINE : LINE)
-    code.forEach((color, x) => set(21 + x, 1 + row, color))
+    for (let x = 3; x < 15; x++) set(x, top + row)
   }
+  for (const x of [1, 2, 15, 16]) set(x, top + 2)
+  if (t % 16 !== 15) {
+    set(5 + facing, top + 1, CLEAR)
+    set(12 + facing, top + 1, CLEAR)
+  }
+  for (const x of [4, 6, 11, 13]) set(x, isHop ? 4 : 5)
+  if (isHop) for (const x of [3, 7, 10, 14]) set(x, 5)
 
   // Two pixels per cell: the upper half block takes the top pixel as its
   // color and the bottom one as its background.
-  const words = new Uint32Array(WIDTH * ROWS * 3)
+  const words = new Uint32Array(columns * ROWS * 3)
   for (let row = 0; row < ROWS; row++) {
-    for (let x = 0; x < WIDTH; x++) {
-      const top = px[2 * row * WIDTH + x]!
-      const bottom = px[(2 * row + 1) * WIDTH + x]!
+    for (let x = 0; x < columns; x++) {
+      const upper = px[2 * row * columns + x]!
+      const lower = px[(2 * row + 1) * columns + x]!
       const cell = [0x20, DEFAULT, DEFAULT]
-      if (top !== CLEAR) cell.splice(0, 3, 0x2580, top, bottom === CLEAR ? DEFAULT : bottom)
-      else if (bottom !== CLEAR) cell.splice(0, 3, 0x2584, bottom, DEFAULT)
-      words.set(cell, (row * WIDTH + x) * 3)
+      if (upper !== CLEAR) cell.splice(0, 3, 0x2580, upper, lower === CLEAR ? DEFAULT : lower)
+      else if (lower !== CLEAR) cell.splice(0, 3, 0x2584, lower, DEFAULT)
+      words.set(cell, (row * columns + x) * 3)
     }
   }
   return new Uint8Array(words.buffer).toBase64()
@@ -109,12 +60,15 @@ export const frame = (t: number) => {
 let timer: Timer | undefined
 let tick = 0
 let bandId: string | undefined
+let bandColumns = 0
 
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
     tick += 1
     // A frame that cannot be painted is skipped; the next one tries again.
-    if (bandId) $.ui.blit({ requestId: bandId, key: KEY, cells: frame(tick) }).catch(() => {})
+    if (bandId) {
+      $.ui.blit({ requestId: bandId, key: KEY, cells: frame(tick, bandColumns) }).catch(() => {})
+    }
   })
 }
 
@@ -147,11 +101,14 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The band spans the window, so a resize redraws it at the new width.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const isWorking = (await read($, working)) !== null
-    if (!isWorking || e.surface !== 'terminal' || e.props.hasSurvey || e.props.bodyColumns < WIDTH) return next(e)
+    const columns = Math.min(e.props.bodyColumns, MAX_COLUMNS)
+    if (!isWorking || e.surface !== 'terminal' || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
     bandId = e.requestId
+    bandColumns = columns
     const { Raster } = $.ui.resolve(e)
-    return <Raster key={KEY} columns={WIDTH} rows={ROWS} cells={frame(tick)} />
+    return <Raster key={KEY} columns={columns} rows={ROWS} cells={frame(tick, columns)} />
   })
 }
