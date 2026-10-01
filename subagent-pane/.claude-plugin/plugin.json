@@ -1,0 +1,6 @@
+{
+  "name": "subagent-pane",
+  "version": "0.1.0",
+  "description": "A pane listing each subagent with its type, model, effort, task and status. Refuses Haiku and a sixth coder running at once.",
+  "types": "./types/index.d.ts"
+}
