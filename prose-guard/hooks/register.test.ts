@@ -14,17 +14,17 @@ function engine(on: any, fileText: string | null = null) {
 
 const call = ($: any, input: Record<string, unknown>) => $.tool.call(input)
 
-// A model beneath the plugin streams `pieces` as one text block; returns the
-// text the plugin passes on.
-async function streamReply($: any, on: any, pieces: string[]) {
+// A model beneath the plugin streams `pieces` as one block of `kind`; returns
+// the text the plugin passes on.
+async function streamReply($: any, on: any, pieces: string[], kind: 'text' | 'thinking' = 'text') {
   on('turn.step', async function* (_$: any, e: any) {
-    for (const text of pieces) yield { kind: 'text', index: 0, text }
+    for (const text of pieces) yield { kind, index: 0, text }
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
   const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
   let text = ''
   for (let item = await stream.next(); !item.done; item = await stream.next()) {
-    if (item.value.kind === 'text') text += item.value.text
+    if (item.value.kind === kind) text += item.value.text
   }
   return text
 }
@@ -116,6 +116,10 @@ describe('em dashes as the reply streams', () => {
 
   test('a dash split across pieces becomes one comma', async ($, on) => {
     expect(await streamReply($, on, ['a ', DASH, ' b'])).toBe('a, b')
+  })
+
+  test('thinking, which the app shows as progress notes, gets the same rewrite', async ($, on) => {
+    expect(await streamReply($, on, ['now ', `${DASH} the edit`], 'thinking')).toBe('now, the edit')
   })
 
   test('text without a dash streams unchanged', async ($, on) => {

@@ -151,14 +151,16 @@ export const register: Register = on => {
   })
 
   // Each em dash in a reply becomes a comma as the reply streams, so none is
-  // drawn or recorded. A piece's trailing spaces and dashes wait for the next
-  // piece of the same block, since the rest of the dash may arrive there.
+  // drawn or recorded. Thinking gets the same rewrite, since the app shows it
+  // as progress notes; the engine still records the signed original. A
+  // piece's trailing spaces and dashes wait for the next piece of the same
+  // block, since the rest of the dash may arrive there.
   on('turn.step', async function* ($, e, next) {
     let held = ''
     let heldIndex = -1
     let dashes = 0
     for await (const c of next(e)) {
-      if (c.kind !== 'text') {
+      if (c.kind !== 'text' && c.kind !== 'thinking') {
         yield c
         continue
       }
