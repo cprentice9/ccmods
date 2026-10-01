@@ -83,8 +83,12 @@ test('every other frame he hops with his feet splayed', () => {
   // The top of his head: one pixel down on a step, at the top on a hop.
   expect(cell(frame(0, COLUMNS), 7, 0)).toEqual([0x2584, ORANGE, DEFAULT])
   expect(cell(frame(1, COLUMNS), 8, 0)).toEqual([0x2580, ORANGE, ORANGE])
-  // A splayed foot on the bottom row while hopping.
-  expect(cell(frame(1, COLUMNS), 4, 2)).toEqual([0x2584, ORANGE, DEFAULT])
+  // Standing, his outer left leg runs straight down from the edge of his body.
+  expect(cell(frame(0, COLUMNS), 3, 2)).toEqual([0x2580, ORANGE, ORANGE])
+  expect(cell(frame(0, COLUMNS), 4, 2)).toEqual([0x2580, ORANGE, DEFAULT])
+  // Hopping, that foot splays out one pixel on the bottom row.
+  expect(cell(frame(1, COLUMNS), 3, 2)).toEqual([0x2584, ORANGE, DEFAULT])
+  expect(cell(frame(1, COLUMNS), 4, 2)).toEqual([0x2580, ORANGE, DEFAULT])
 })
 
 test('his eyes look the way he walks, and he blinks every 16th frame', () => {

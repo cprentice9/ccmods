@@ -38,8 +38,9 @@ export const frame = (t: number, columns: number) => {
     set(5 + facing, top + 1, CLEAR)
     set(12 + facing, top + 1, CLEAR)
   }
-  for (const x of [4, 6, 11, 13]) set(x, isHop ? 4 : 5)
-  if (isHop) for (const x of [3, 7, 10, 14]) set(x, 5)
+  // Legs start at the edges of his body; a hop splays the feet.
+  for (const x of [3, 5, 12, 14]) set(x, isHop ? 4 : 5)
+  if (isHop) for (const x of [2, 6, 11, 15]) set(x, 5)
 
   // Two pixels per cell: the upper half block takes the top pixel as its
   // color and the bottom one as its background.
