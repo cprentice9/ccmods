@@ -2,6 +2,9 @@
   "name": "stuck-detector",
   "version": "0.1.0",
   "description": "Notices when the same test command fails twice in a row and tells the model to ask for a second opinion.",
+  "author": {
+    "name": "cprentice9"
+  },
   "userConfig": {
     "note": {
       "type": "string",

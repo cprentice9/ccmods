@@ -1,5 +1,8 @@
 {
   "name": "prose-guard",
   "version": "0.1.0",
-  "description": "Blocks em dashes in edits, shell commands and replies, and British spellings in prose files, commit messages and pull requests."
+  "description": "Blocks em dashes in edits, shell commands and replies, and British spellings in prose files, commit messages and pull requests.",
+  "author": {
+    "name": "cprentice9"
+  }
 }
