@@ -27,7 +27,8 @@ const LAPTOP = '#9a9c9f'
 // The desktop Clawd, drawn the way the app's own one is: seen from the side,
 // facing left, his head over his face with one eye (E, a hole), his front (F)
 // and back (B) hands out in front of him over a laptop (g) whose lid tilts
-// back and whose base sits on the ground. 28 cells by 14.
+// back and whose base sits on the ground. His four legs bend a little at the
+// knee. 28 cells by 14.
 const SIDE = [
   '...........OOOOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
@@ -40,8 +41,8 @@ const SIDE = [
   'g.......FFBBOOOOOOOOOOOOOOO.',
   'gg......FFBBOOOOOOOOOOOOOOO.',
   '.gg.......BBOOOOOOOOOOOOOOO.',
-  '..gg........OO..OO...OO..OO.',
-  '...ggg......OO..OO...OO..OO.',
+  '..gg.......OO..OO...OO..OO..',
+  '...ggg.....OOO.OOO..OOO.OOO.',
   '....ggggggg.OO..OO...OO..OO.',
 ]
 const SIDE_COLUMNS = SIDE[0]!.length

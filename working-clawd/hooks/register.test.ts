@@ -206,9 +206,13 @@ test('the desktop scene: he sits at the right end at his laptop, minis to his le
   expect(cell(source, 11, 0)).toBe('#d77757')
   expect(cell(source, 19, 3)).toBeUndefined()
   expect(cell(source, 4, 13)).toBe('#9a9c9f')
-  // His legs are plain rectangles to the ground, no feet.
-  for (const y of [11, 12, 13]) expect(cell(source, 25, y)).toBe('#d77757')
+  // His legs bend a little at the knee: the back leg steps out a cell at
+  // row 12 and comes down a cell further back.
+  expect(cell(source, 24, 11)).toBe('#d77757')
+  expect(cell(source, 26, 11)).toBeUndefined()
+  expect(cell(source, 26, 12)).toBe('#d77757')
   expect(cell(source, 24, 13)).toBeUndefined()
+  expect(cell(source, 26, 13)).toBe('#d77757')
   // He blinks every 16th frame.
   expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
   // His hands take turns dipping a cell: on even frames the front one is down.
