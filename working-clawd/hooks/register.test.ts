@@ -195,21 +195,25 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
   await complete($, 't1')
 })
 
-test('the desktop scene: he sits at the right end typing, minis to his left', () => {
-  const at = (source: string, x: number, y: number) =>
-    source.match(new RegExp(`<rect x="${x}" y="${y}" width="\\d+" height="1" fill="(#[0-9a-f]{6})"/>`))?.[1]
+test('the desktop scene: he sits at the right end behind a MacBook, minis to his left', () => {
   const source = svg(0, 30)
-  expect(source).toContain('width="180" height="42" viewBox="0 0 30 7"')
-  // He sits in the last 18 columns: the top of his head at x 22, his laptop's
-  // lid at x 14 and its base on the bottom row of the box line.
-  expect(at(source, 22, 0)).toBe('#d77757')
-  expect(at(source, 14, 2)).toBe('#8a8f98')
-  expect(at(source, 16, 5)).toBe('#b4b8bf')
-  // Even frames his hand is on the keys; odd frames it is raised.
-  expect(at(source, 19, 4)).toBe('#d77757')
-  expect(at(svg(1, 30), 19, 3)).toBe('#d77757')
-  // A mini sits 11 columns to his left of his seat, with its own laptop.
-  const withMini = svg(0, 40, 1)
-  expect(at(withMini, 12, 3)).toBe('#8a8f98')
-  expect(at(withMini, 17, 2)).toBe('#d77757')
+  expect(source).toContain('width="240" height="40" viewBox="0 0 30 5"')
+  // The app's background behind him, so the band's box disappears.
+  expect(source).toContain('<rect width="100%" height="100%" fill="#151515"/>')
+  // His box is the last 17 columns: the top of his head starts at x 16, and
+  // the right arm reaches the band's right edge.
+  expect(source).toContain('<rect x="16" y="0" width="12" height="1" fill="#d77757"/>')
+  expect(source).toContain('<rect x="28" y="2" width="2" height="1" fill="#d77757"/>')
+  // The aluminum lid in front of him, with the apple at its center.
+  expect(source).toContain('<rect x="17.5" y="2.2" width="8" height="2.8" fill="#b9bcc0" rx="0.25"/>')
+  expect(source).toContain('<circle cx="21.5" cy="3.5" r="0.5" fill="#e4e6e8"/>')
+  // His arms bob in turn: the left is up on even frames, the right on odd.
+  expect(source).toContain('<rect x="14" y="1.5" width="2" height="1" fill="#d77757"/>')
+  expect(svg(1, 30)).toContain('<rect x="28" y="1.5" width="2" height="1" fill="#d77757"/>')
+  // He blinks every 16th frame: the eye row is one solid run.
+  expect(svg(15, 30)).toContain('<rect x="16" y="1" width="12" height="1" fill="#d77757"/>')
+  // Each mini is half size with its own laptop; one that does not fit is left out.
+  const lids = (markup: string) => markup.split('fill="#b9bcc0" rx').length - 1
+  expect(lids(svg(0, 30, 1))).toBe(2)
+  expect(lids(svg(0, 30, 3))).toBe(2)
 })

@@ -16,49 +16,25 @@ const HEIGHT = 6
 const ROWS = HEIGHT / 2
 const TICK_MS = 150
 // CSS pixels per pixel of Clawd in the desktop app.
-const PIXEL = 6
+const PIXEL = 8
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 
 const CLEAR = -1
 const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
-const LID = 0x8a8f98
-const GLOW = 0x7fb4ca
-const BASE = 0xb4b8bf
-
-// The desktop scene: Clawd seen from the side, facing left, typing on a
-// laptop whose lid (g) tilts back with its screen's glow (c) on the inside,
-// and its base (b) on the box. E is an eye, filled when he blinks. Each
-// sprite lists the pixels of its hand on the keys and raised.
-const SIDE_HEIGHT = 7
-const SIDE = {
-  rows: [
-    '..........OOOOOO..',
-    '........OOOOOOOOO.',
-    '..g.....OEOOOOOOO.',
-    '...gc...OOOOOOOOO.',
-    '....gc..OOOOOOOOO.',
-    '....bbbbbOOOOOOOO.',
-    '.........O.O.O.O..',
-  ],
-  down: [[7, 4], [8, 5]],
-  up: [[7, 3]],
-}
-const SIDE_MINI = {
-  rows: [
-    '..........',
-    '..........',
-    '......OOO.',
-    '.g...OOOOO',
-    '..gc.OEOOO',
-    '..bbbbOOOO',
-    '......O.O.',
-  ],
-  down: [[4, 4]],
-  up: [[4, 3]],
-}
-const SIDE_COLORS: Record<string, number> = { O: ORANGE, g: LID, c: GLOW, b: BASE }
+// The desktop app's own background, painted behind him so the band's box
+// disappears into the window.
+const APP_BACKGROUND = '#151515'
+const ALUMINUM = '#b9bcc0'
+const RIM = '#dfe1e3'
+const APPLE = '#e4e6e8'
+const DECK = '#d3d5d8'
+const GLOW = '#7fb4ca'
+// The desktop scene in Clawd pixels: his 17-wide box, standing on the band's
+// bottom edge, which is the top of the prompt box.
+const SCENE_WIDTH = 17
+const SCENE_HEIGHT = 5
 
 const mod = (n: number, m: number) => ((n % m) + m) % m
 
@@ -137,47 +113,52 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
   return new Uint8Array(words.buffer).toBase64()
 }
 
-// The desktop scene's pixels: Clawd sits at the right end of the box, typing,
-// with each mini in a row to his left at its own laptop, as many as fit.
-// Hands go down on even frames, in time; the screens' glow flickers, and he
-// blinks every 16th frame.
-const sidePixels = (t: number, columns: number, minis: number, hasLeader: boolean) => {
-  const px = new Int32Array(columns * SIDE_HEIGHT).fill(CLEAR)
-  const put = (sprite: typeof SIDE, left: number) => {
-    if (left < 0) return
-    sprite.rows.forEach((row, y) => [...row].forEach((ch, x) => {
-      if (ch === 'E' && mod(t, 16) === 15) ch = 'O'
-      if (ch === 'c' && mod(t, 3) === 2) return
-      const color = SIDE_COLORS[ch]
-      if (color !== undefined) px[y * columns + left + x] = color
-    }))
-    for (const [x, y] of mod(t, 2) === 0 ? sprite.down : sprite.up) px[y! * columns + left + x!] = ORANGE
-  }
-  const seat = columns - SIDE.rows[0]!.length
-  if (hasLeader) put(SIDE, seat)
-  const width = SIDE_MINI.rows[0]!.length + 1
-  for (let i = 0; i < Math.min(minis, MAX_MINIS); i++) put(SIDE_MINI, seat - width * (i + 1))
-  return px
+// One Clawd at his laptop, as SVG shapes in Clawd pixels: the logo's body,
+// eyes as holes and side arms, sitting behind an open MacBook seen from the
+// back, its aluminum lid marked with an apple. `s` scales him (a mini is
+// half size). His arms bob in turn as he types, the screen's glow flickers on
+// his face, and he blinks every 16th frame.
+const clawdAtLaptop = (left: number, top: number, s: number, t: number) => {
+  const r = (x: number, y: number, w: number, h: number, fill: string, extra = '') =>
+    `<rect x="${left + x * s}" y="${top + y * s}" width="${w * s}" height="${h * s}" fill="${fill}"${extra}/>`
+  const orange = `#${ORANGE.toString(16)}`
+  const isBlink = mod(t, 16) === 15
+  const isLeftUp = mod(t, 2) === 0
+  const parts = [
+    r(3, 0, 12, 1, orange),
+    ...(isBlink ? [r(3, 1, 12, 1, orange)] : [r(3, 1, 2, 1, orange), r(6, 1, 6, 1, orange), r(13, 1, 2, 1, orange)]),
+    r(3, 2, 12, 2, orange),
+    r(1, isLeftUp ? 1.5 : 2, 2, 1, orange),
+    r(15, isLeftUp ? 2 : 1.5, 2, 1, orange),
+    ...[3, 5, 12, 14].map(x => r(x, 4, 1, 1, orange)),
+  ]
+  if (mod(t, 3) !== 2) parts.push(r(3, 0, 12, 2.2, GLOW, ' opacity="0.12"'))
+  const cx = left + 8.5 * s
+  const cy = top + 3.5 * s
+  parts.push(
+    r(4.5, 2.2, 8, 2.8, ALUMINUM, ` rx="${0.25 * s}"`),
+    r(4.5, 2.2, 8, 0.18, RIM, ` rx="${0.09 * s}"`),
+    `<circle cx="${cx}" cy="${cy}" r="${0.5 * s}" fill="${APPLE}"/>`,
+    `<circle cx="${cx + 0.48 * s}" cy="${cy - 0.12 * s}" r="${0.22 * s}" fill="${ALUMINUM}"/>`,
+    `<ellipse cx="${cx + 0.08 * s}" cy="${cy - 0.68 * s}" rx="${0.12 * s}" ry="${0.22 * s}" fill="${APPLE}" transform="rotate(35 ${cx + 0.08 * s} ${cy - 0.68 * s})"/>`,
+    r(4, 4.8, 9, 0.2, DECK, ` rx="${0.1 * s}"`),
+  )
+  return parts.join('')
 }
 
-// A frame as SVG markup for the desktop app: each row's runs of one color as
-// rectangles, a pixel PIXEL CSS pixels square.
+// A frame as SVG markup for the desktop app, in Clawd pixels PIXEL CSS pixels
+// square: Clawd at the right end of the box, each mini in a row to his left
+// at its own laptop, as many as fit, all typing in time.
 export const svg = (t: number, columns: number, minis = 0, hasLeader = true) => {
-  const px = sidePixels(t, columns, minis, hasLeader)
-  const rects: string[] = []
-  for (let y = 0; y < SIDE_HEIGHT; y++) {
-    for (let x = 0; x < columns; x++) {
-      const color = px[y * columns + x]!
-      if (color === CLEAR) continue
-      let end = x
-      while (end + 1 < columns && px[y * columns + end + 1] === color) end++
-      const fill = `#${color.toString(16).padStart(6, '0')}`
-      rects.push(`<rect x="${x}" y="${y}" width="${end - x + 1}" height="1" fill="${fill}"/>`)
-      x = end
-    }
+  const seat = columns - SCENE_WIDTH
+  const parts = hasLeader ? [clawdAtLaptop(seat, 0, 1, t)] : []
+  const mini = SCENE_WIDTH / 2 + 1
+  for (let i = 0; i < Math.min(minis, MAX_MINIS); i++) {
+    const left = seat - mini * (i + 1)
+    if (left >= 0) parts.push(clawdAtLaptop(left, SCENE_HEIGHT / 2, 0.5, t))
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * PIXEL}" height="${SIDE_HEIGHT * PIXEL}" `
-    + `viewBox="0 0 ${columns} ${SIDE_HEIGHT}" shape-rendering="crispEdges">${rects.join('')}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * PIXEL}" height="${SCENE_HEIGHT * PIXEL}" `
+    + `viewBox="0 0 ${columns} ${SCENE_HEIGHT}"><rect width="100%" height="100%" fill="${APP_BACKGROUND}"/>${parts.join('')}</svg>`
 }
 
 // What the band last drew, for the timer's repaints between draws.
@@ -261,8 +242,12 @@ export const register: Register = on => {
     if (isIdle || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
     if (e.surface === 'desktop') {
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
-      const { Svg } = $.ui.resolve(e)
-      return <Svg source={svg(tick, columns, minis, hasLeader)} alt="Clawd walking while Claude works" />
+      const { Box, Svg } = $.ui.resolve(e)
+      return (
+        <Box backgroundColor={APP_BACKGROUND}>
+          <Svg source={svg(tick, columns, minis, hasLeader)} alt="Clawd typing on a laptop while Claude works" />
+        </Box>
+      )
     }
     if (e.surface !== 'terminal') return next(e)
     band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
