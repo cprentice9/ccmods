@@ -65,6 +65,16 @@ export const register: Register = on => {
     return r
   })
 
+  // /clear starts the cost over, so the token totals start over with it.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') {
+      await update($, tokens, () => ({}))
+      $.ui.status(undefined)
+    }
+
+    return next(e)
+  })
+
   on('turn.step', async function* ($, e, next) {
     const r = yield* next(e)
 

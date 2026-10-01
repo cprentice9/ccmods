@@ -147,6 +147,16 @@ describe('model-spend', () => {
     expect(lines).toEqual(['Sonnet 2k 100% · $0.50'])
   })
 
+  test('starts the totals over after /clear', async ($, on) => {
+    const { lines, pending } = world(on, 0.5)
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    await step($, pending, usage({ model: 'claude-sonnet-5-5', output_tokens: 2000 }))
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    await step($, pending, usage({ model: 'claude-opus-5-5', output_tokens: 1000 }))
+
+    expect(lines.at(-1)).toBe('Opus 1k 100% · $0.50')
+  })
+
   test('clears the line on session start before any tokens', async ($, on) => {
     const { lines } = world(on, 0)
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
