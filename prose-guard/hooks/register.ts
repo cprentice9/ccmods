@@ -1,22 +1,16 @@
-import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-// Em dashes blocked: this session's count in state, the all-time count in the store.
-const blocked = atom({ plugin: 'prose-guard', key: 'blocked' } as const, 0)
+// The em dashes blocked across all sessions, kept in the store.
 const ALL_TIME = 'emDashesBlocked'
-
-const plural = (n: number) => (n === 1 ? 'em dash' : 'em dashes')
 
 const drawCount = async ($: EngineInterface) => {
   const total = Number((await $.store.get(ALL_TIME)) ?? 0)
-  const session = (await read($, blocked)) ?? 0
-  if (total > 0) $.ui.status(`${session} ${plural(session)} blocked this session, ${total} in all`)
+  if (total > 0) $.ui.status(`${total} ${total === 1 ? 'em dash' : 'em dashes'} blocked`)
 }
 
 // A counter that fails must never let a dash through, so its errors stop here.
 const tally = async ($: EngineInterface, dashes: number) => {
   try {
-    await update($, blocked, n => (n ?? 0) + dashes)
     await $.store.set(ALL_TIME, Number((await $.store.get(ALL_TIME)) ?? 0) + dashes)
     await drawCount($)
   } catch {}

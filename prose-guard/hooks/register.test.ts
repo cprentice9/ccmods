@@ -177,14 +177,14 @@ describe('the blocked counter', () => {
     await call($, { tool: 'Edit', file_path: 'x.ts', old_string: 'a', new_string: `${DASH} ${DASH}` })
     await $.classic.Stop({ stop_hook_active: false, last_assistant_message: `a ${DASH} b` })
     expect(store.get('emDashesBlocked')).toBe(43)
-    expect(lines.at(-1)).toBe('3 em dashes blocked this session, 43 in all')
+    expect(lines.at(-1)).toBe('43 em dashes blocked')
   })
 
-  test('one dash in a session reads in the singular', async ($, on) => {
+  test('one dash reads in the singular', async ($, on) => {
     engine(on)
-    const { lines } = counter(on, 9)
+    const { lines } = counter(on, 0)
     await call($, { tool: 'Bash', command: `echo ${DASH}` })
-    expect(lines.at(-1)).toBe('1 em dash blocked this session, 10 in all')
+    expect(lines.at(-1)).toBe('1 em dash blocked')
   })
 
   test('a call that passes counts nothing', async ($, on) => {
@@ -199,6 +199,6 @@ describe('the blocked counter', () => {
     on('session.start', (_$: any, e: { cwd: string }) => ({ cwd: e.cwd }))
     const { lines } = counter(on, 7)
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
-    expect(lines).toEqual(['0 em dashes blocked this session, 7 in all'])
+    expect(lines).toEqual(['7 em dashes blocked'])
   })
 })
