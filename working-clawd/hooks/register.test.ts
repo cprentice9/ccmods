@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { frame } from './register.tsx'
+import { frame, svg } from './register.tsx'
 
 const ORANGE = 0xd77757
 const DEFAULT = 0x01000000
@@ -61,7 +61,7 @@ const engine = (on: On) => {
   return { periods, blits, tick: () => release() }
 }
 
-const mount = ($: Engine, surface: 'terminal' | 'desktop', bodyColumns = 100) =>
+const mount = ($: Engine, surface: 'terminal' | 'desktop' | 'vscode', bodyColumns = 100) =>
   $.ui.mount({
     plugin: 'working-clawd',
     surface,
@@ -180,12 +180,25 @@ test('each tick of the timer repaints the band with the next frame', async ($, o
   await complete($, 't1')
 })
 
-test('the band stays out of the desktop app and a narrow terminal', async ($, on) => {
+test('the desktop app draws him as an SVG; a narrow terminal and the editor draw nothing', async ($, on) => {
   engine(on)
   await $.turn.start({ text: 'hi', turnId: 't1' })
-  for (const ui of [await mount($, 'desktop'), await mount($, 'terminal', 20)]) {
+  const desktop = await mount($, 'desktop')
+  const drawn = await desktop.find({ type: 'Svg' })
+  expect(drawn?.props.source).toBe(svg(0, 100, 0, true))
+  await desktop.unmount()
+  for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
+    expect(await ui.find({ type: 'Svg' })).toBeUndefined()
     await ui.unmount()
   }
   await complete($, 't1')
+})
+
+test('the SVG holds his pixels as orange runs, six CSS pixels each', () => {
+  const source = svg(0, 30)
+  expect(source).toContain('width="180" height="36" viewBox="0 0 30 6"')
+  expect(source).toContain('fill="#d77757"')
+  // Frame 0, standing at the left edge: his body's top row runs 12 pixels from x 3 at y 1.
+  expect(source).toContain('<rect x="3" y="1" width="12" height="1"/>')
 })

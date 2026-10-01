@@ -15,6 +15,8 @@ const MAX_COLUMNS = 512
 const HEIGHT = 6
 const ROWS = HEIGHT / 2
 const TICK_MS = 150
+// CSS pixels per pixel of Clawd in the desktop app.
+const PIXEL = 6
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 
@@ -33,12 +35,12 @@ const path = (t: number, columns: number) => {
   return { center, facing: step < range ? 1 : -1 }
 }
 
-// One frame as Raster cells, `columns` wide. Clawd, drawn as the CLI logo
-// draws him, walks the path; every other frame he hops, feet splayed, his eyes
-// look the way he is walking, and he blinks every 16th frame. Each mini, one
-// per running subagent, walks the same path a set number of frames behind,
+// One frame's pixels, `columns` wide and HEIGHT tall. Clawd, drawn as the CLI
+// logo draws him, walks the path; every other frame he hops, feet splayed, his
+// eyes look the way he is walking, and he blinks every 16th frame. Each mini,
+// one per running subagent, walks the same path a set number of frames behind,
 // so they follow him around each turn and hop in step.
-export const frame = (t: number, columns: number, minis = 0, hasLeader = true) => {
+const pixels = (t: number, columns: number, minis: number, hasLeader: boolean) => {
   const px = new Int32Array(columns * HEIGHT).fill(CLEAR)
   const sprite = (at: number, width: number) => {
     const { center, facing } = path(at, columns)
@@ -77,9 +79,14 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
     for (const x of [3, 5, 12, 14]) set(x, isHop ? 4 : 5)
     if (isHop) for (const x of [2, 6, 11, 15]) set(x, 5)
   }
+  return px
+}
 
-  // Two pixels per cell: the upper half block takes the top pixel as its
-  // color and the bottom one as its background.
+// A frame as Raster cells for the terminal. Two pixels per cell: the upper
+// half block takes the top pixel as its color and the bottom one as its
+// background.
+export const frame = (t: number, columns: number, minis = 0, hasLeader = true) => {
+  const px = pixels(t, columns, minis, hasLeader)
   const words = new Uint32Array(columns * ROWS * 3)
   for (let row = 0; row < ROWS; row++) {
     for (let x = 0; x < columns; x++) {
@@ -94,16 +101,39 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
   return new Uint8Array(words.buffer).toBase64()
 }
 
+// A frame as SVG markup for the desktop app: each row's runs of orange pixels
+// as rectangles, a pixel PIXEL CSS pixels square.
+export const svg = (t: number, columns: number, minis = 0, hasLeader = true) => {
+  const px = pixels(t, columns, minis, hasLeader)
+  const rects: string[] = []
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < columns; x++) {
+      if (px[y * columns + x] === CLEAR) continue
+      let end = x
+      while (end + 1 < columns && px[y * columns + end + 1] !== CLEAR) end++
+      rects.push(`<rect x="${x}" y="${y}" width="${end - x + 1}" height="1"/>`)
+      x = end
+    }
+  }
+  const fill = `#${ORANGE.toString(16).padStart(6, '0')}`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * PIXEL}" height="${HEIGHT * PIXEL}" `
+    + `viewBox="0 0 ${columns} ${HEIGHT}" shape-rendering="crispEdges"><g fill="${fill}">${rects.join('')}</g></svg>`
+}
+
 // What the band last drew, for the timer's repaints between draws.
 let timer: Timer | undefined
 let tick = 0
-let band: { id: string; columns: number; minis: number; hasLeader: boolean } | undefined
+let band: { id: string; surface: string; columns: number; minis: number; hasLeader: boolean } | undefined
 
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
     tick += 1
-    // A frame that cannot be painted is skipped; the next one tries again.
-    if (band) {
+    if (!band) return
+    // The desktop app redraws the SVG; the terminal repaints its cells in
+    // place. A frame that cannot be painted is skipped and the next one tries.
+    if (band.surface === 'desktop') {
+      $.ui.invalidate('ui.render')
+    } else {
       const cells = frame(tick, band.columns, band.minis, band.hasLeader)
       $.ui.blit({ requestId: band.id, key: KEY, cells }).catch(() => {})
     }
@@ -161,14 +191,21 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The band spans the window, so a resize redraws it at the new width.
+  // The band spans the window, so a resize redraws it at the new width. The
+  // terminal draws cells; the desktop app, which has no Raster, an SVG.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const hasLeader = (await read($, working)) !== null
     const minis = (await read($, agents)).length
     const columns = Math.min(e.props.bodyColumns, MAX_COLUMNS)
     const isIdle = !hasLeader && minis === 0
-    if (isIdle || e.surface !== 'terminal' || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
-    band = { id: e.requestId, columns, minis, hasLeader }
+    if (isIdle || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
+    if (e.surface === 'desktop') {
+      band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
+      const { Svg } = $.ui.resolve(e)
+      return <Svg source={svg(tick, columns, minis, hasLeader)} alt="Clawd walking while Claude works" />
+    }
+    if (e.surface !== 'terminal') return next(e)
+    band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
     const { Raster } = $.ui.resolve(e)
     return <Raster key={KEY} columns={columns} rows={ROWS} cells={frame(tick, columns, minis, hasLeader)} />
   })
