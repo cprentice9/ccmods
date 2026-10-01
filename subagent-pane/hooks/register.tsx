@@ -131,11 +131,17 @@ export const register: Register = on => {
     }
   })
 
-  // The first request of a subagent's loop carries the effort it runs at.
+  // The first request of a subagent's loop carries the effort it runs at. A
+  // request after the subagent stopped means it resumed, so it runs again.
   on('turn.step', async function* ($, e, next) {
     const { agentId, effort } = e
-    if (agentId && (await read($, agents)).facts[agentId]?.effort === undefined) {
-      await update($, agents, setFacts(agentId, f => ({ ...f, effort: f.effort ?? (effort === undefined ? 'none' : String(effort)) })))
+    const facts = agentId ? (await read($, agents)).facts[agentId] : undefined
+    if (agentId && (facts?.effort === undefined || facts.status)) {
+      await update($, agents, setFacts(agentId, f => ({
+        ...f,
+        status: undefined,
+        effort: f.effort ?? (effort === undefined ? 'none' : String(effort)),
+      })))
     }
     const ran = yield* next(e)
     // Each finished response redraws the detail view with its thinking and words.
@@ -148,8 +154,10 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const { agentId } = e
     if (agentId) {
+      // A subagent that stops and later resumes ends one turn per run, each
+      // reporting its own duration, so the runs add up.
       const status = e.reason === 'answer' ? 'done' : 'failed'
-      await update($, agents, setFacts(agentId, f => ({ ...f, status, durationMs: e.durationMs })))
+      await update($, agents, setFacts(agentId, f => ({ ...f, status, durationMs: (f.durationMs ?? 0) + e.durationMs })))
     }
     return next(e)
   })

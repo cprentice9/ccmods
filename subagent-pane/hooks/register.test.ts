@@ -28,8 +28,8 @@ const step = async ($: Engine, agentId: string, effort: 'low' | 'medium' | 'high
   }
 }
 
-const complete = ($: Engine, agentId: string, reason: 'answer' | 'error') =>
-  $.turn.complete({ answer: 'ok', durationMs: 75_000, isAborted: false, turnId: `t-${agentId}`, agentId, reason })
+const complete = ($: Engine, agentId: string, reason: 'answer' | 'error', durationMs = 75_000) =>
+  $.turn.complete({ answer: 'ok', durationMs, isAborted: false, turnId: `t-${agentId}`, agentId, reason })
 
 const mount = ($: Engine, surface: (typeof SURFACES)[number]) =>
   $.ui.mount({
@@ -74,6 +74,25 @@ test('a spawn adds a row with the resolved model, and effort and status fill in'
     await ui.unmount()
   }
   expect(opened).toEqual(['subagents'])
+})
+
+test('a subagent that stops and resumes runs again and adds up its time', async ($, on) => {
+  engine(on)
+  await spawn($, 'helper')
+  await step($, 'a1', 'medium')
+  await complete($, 'a1', 'answer', 43_000)
+  await step($, 'a1', 'medium')
+
+  let ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: /^running helper/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1 running, 1 total/ })).toBeDefined()
+  await ui.unmount()
+
+  await complete($, 'a1', 'answer', 1_000)
+  ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: /^done helper/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '44s' })).toBeDefined()
+  await ui.unmount()
 })
 
 test('/subagents opens the pane', async ($, on) => {
