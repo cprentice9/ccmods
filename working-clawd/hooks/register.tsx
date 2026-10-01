@@ -15,8 +15,8 @@ const MAX_COLUMNS = 512
 const HEIGHT = 6
 const ROWS = HEIGHT / 2
 const TICK_MS = 150
-// CSS pixels per cell of the desktop sprite, the size the app's own Clawd uses.
-const CELL = 1.5
+// CSS pixels per cell of the desktop sprite, a little bigger than the app's own Clawd.
+const CELL = 2
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 
@@ -42,7 +42,7 @@ const SIDE = [
   '.gg.......BBOOOOOOOOOOOOOOO.',
   '..gg........OO..OO...OO..OO.',
   '...ggg......OO..OO...OO..OO.',
-  '....gggggggOOO.OOO..OOO.OOO.',
+  '....ggggggg.OO..OO...OO..OO.',
 ]
 const SIDE_COLUMNS = SIDE[0]!.length
 const SIDE_ROWS = SIDE.length

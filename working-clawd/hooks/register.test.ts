@@ -185,7 +185,7 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
   const drawn = await desktop.find({ type: 'Svg' })
-  expect(drawn?.props).toMatchObject({ source: svg(0, 2000, 0, true), height: 21 })
+  expect(drawn?.props).toMatchObject({ source: svg(0, 2000, 0, true), height: 28 })
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
@@ -200,12 +200,15 @@ test('the desktop scene: he sits at the right end at his laptop, minis to his le
     markup.match(new RegExp(`<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="(#[0-9a-f]{6})"/>`))?.[1]
   const source = svg(0, 40)
   // Scaled by its height and anchored right, with nothing behind him.
-  expect(source).toContain('width="60" height="21" viewBox="0 0 40 14" preserveAspectRatio="xMaxYMax slice"')
+  expect(source).toContain('width="80" height="28" viewBox="0 0 40 14" preserveAspectRatio="xMaxYMax slice"')
   expect(source).toContain('<g transform="translate(12 0) scale(1)">')
   // The top of his head, his eye as a hole, and his laptop's base.
   expect(cell(source, 11, 0)).toBe('#d77757')
   expect(cell(source, 19, 3)).toBeUndefined()
   expect(cell(source, 4, 13)).toBe('#9a9c9f')
+  // His legs are plain rectangles to the ground, no feet.
+  for (const y of [11, 12, 13]) expect(cell(source, 25, y)).toBe('#d77757')
+  expect(cell(source, 24, 13)).toBeUndefined()
   // He blinks every 16th frame.
   expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
   // His hands take turns dipping a cell: on even frames the front one is down.
