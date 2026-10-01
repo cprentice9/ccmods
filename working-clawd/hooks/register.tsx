@@ -23,6 +23,42 @@ const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as s
 const CLEAR = -1
 const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
+const LID = 0x8a8f98
+const GLOW = 0x7fb4ca
+const BASE = 0xb4b8bf
+
+// The desktop scene: Clawd seen from the side, facing left, typing on a
+// laptop whose lid (g) tilts back with its screen's glow (c) on the inside,
+// and its base (b) on the box. E is an eye, filled when he blinks. Each
+// sprite lists the pixels of its hand on the keys and raised.
+const SIDE_HEIGHT = 7
+const SIDE = {
+  rows: [
+    '..........OOOOOO..',
+    '........OOOOOOOOO.',
+    '..g.....OEOOOOOOO.',
+    '...gc...OOOOOOOOO.',
+    '....gc..OOOOOOOOO.',
+    '....bbbbbOOOOOOOO.',
+    '.........O.O.O.O..',
+  ],
+  down: [[7, 4], [8, 5]],
+  up: [[7, 3]],
+}
+const SIDE_MINI = {
+  rows: [
+    '..........',
+    '..........',
+    '......OOO.',
+    '.g...OOOOO',
+    '..gc.OEOOO',
+    '..bbbbOOOO',
+    '......O.O.',
+  ],
+  down: [[4, 4]],
+  up: [[4, 3]],
+}
+const SIDE_COLORS: Record<string, number> = { O: ORANGE, g: LID, c: GLOW, b: BASE }
 
 const mod = (n: number, m: number) => ((n % m) + m) % m
 
@@ -101,23 +137,47 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
   return new Uint8Array(words.buffer).toBase64()
 }
 
-// A frame as SVG markup for the desktop app: each row's runs of orange pixels
-// as rectangles, a pixel PIXEL CSS pixels square.
+// The desktop scene's pixels: Clawd sits at the right end of the box, typing,
+// with each mini in a row to his left at its own laptop, as many as fit.
+// Hands go down on even frames, in time; the screens' glow flickers, and he
+// blinks every 16th frame.
+const sidePixels = (t: number, columns: number, minis: number, hasLeader: boolean) => {
+  const px = new Int32Array(columns * SIDE_HEIGHT).fill(CLEAR)
+  const put = (sprite: typeof SIDE, left: number) => {
+    if (left < 0) return
+    sprite.rows.forEach((row, y) => [...row].forEach((ch, x) => {
+      if (ch === 'E' && mod(t, 16) === 15) ch = 'O'
+      if (ch === 'c' && mod(t, 3) === 2) return
+      const color = SIDE_COLORS[ch]
+      if (color !== undefined) px[y * columns + left + x] = color
+    }))
+    for (const [x, y] of mod(t, 2) === 0 ? sprite.down : sprite.up) px[y! * columns + left + x!] = ORANGE
+  }
+  const seat = columns - SIDE.rows[0]!.length
+  if (hasLeader) put(SIDE, seat)
+  const width = SIDE_MINI.rows[0]!.length + 1
+  for (let i = 0; i < Math.min(minis, MAX_MINIS); i++) put(SIDE_MINI, seat - width * (i + 1))
+  return px
+}
+
+// A frame as SVG markup for the desktop app: each row's runs of one color as
+// rectangles, a pixel PIXEL CSS pixels square.
 export const svg = (t: number, columns: number, minis = 0, hasLeader = true) => {
-  const px = pixels(t, columns, minis, hasLeader)
+  const px = sidePixels(t, columns, minis, hasLeader)
   const rects: string[] = []
-  for (let y = 0; y < HEIGHT; y++) {
+  for (let y = 0; y < SIDE_HEIGHT; y++) {
     for (let x = 0; x < columns; x++) {
-      if (px[y * columns + x] === CLEAR) continue
+      const color = px[y * columns + x]!
+      if (color === CLEAR) continue
       let end = x
-      while (end + 1 < columns && px[y * columns + end + 1] !== CLEAR) end++
-      rects.push(`<rect x="${x}" y="${y}" width="${end - x + 1}" height="1"/>`)
+      while (end + 1 < columns && px[y * columns + end + 1] === color) end++
+      const fill = `#${color.toString(16).padStart(6, '0')}`
+      rects.push(`<rect x="${x}" y="${y}" width="${end - x + 1}" height="1" fill="${fill}"/>`)
       x = end
     }
   }
-  const fill = `#${ORANGE.toString(16).padStart(6, '0')}`
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * PIXEL}" height="${HEIGHT * PIXEL}" `
-    + `viewBox="0 0 ${columns} ${HEIGHT}" shape-rendering="crispEdges"><g fill="${fill}">${rects.join('')}</g></svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * PIXEL}" height="${SIDE_HEIGHT * PIXEL}" `
+    + `viewBox="0 0 ${columns} ${SIDE_HEIGHT}" shape-rendering="crispEdges">${rects.join('')}</svg>`
 }
 
 // What the band last drew, for the timer's repaints between draws.

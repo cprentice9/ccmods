@@ -195,10 +195,21 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
   await complete($, 't1')
 })
 
-test('the SVG holds his pixels as orange runs, six CSS pixels each', () => {
+test('the desktop scene: he sits at the right end typing, minis to his left', () => {
+  const at = (source: string, x: number, y: number) =>
+    source.match(new RegExp(`<rect x="${x}" y="${y}" width="\\d+" height="1" fill="(#[0-9a-f]{6})"/>`))?.[1]
   const source = svg(0, 30)
-  expect(source).toContain('width="180" height="36" viewBox="0 0 30 6"')
-  expect(source).toContain('fill="#d77757"')
-  // Frame 0, standing at the left edge: his body's top row runs 12 pixels from x 3 at y 1.
-  expect(source).toContain('<rect x="3" y="1" width="12" height="1"/>')
+  expect(source).toContain('width="180" height="42" viewBox="0 0 30 7"')
+  // He sits in the last 18 columns: the top of his head at x 22, his laptop's
+  // lid at x 14 and its base on the bottom row of the box line.
+  expect(at(source, 22, 0)).toBe('#d77757')
+  expect(at(source, 14, 2)).toBe('#8a8f98')
+  expect(at(source, 16, 5)).toBe('#b4b8bf')
+  // Even frames his hand is on the keys; odd frames it is raised.
+  expect(at(source, 19, 4)).toBe('#d77757')
+  expect(at(svg(1, 30), 19, 3)).toBe('#d77757')
+  // A mini sits 11 columns to his left of his seat, with its own laptop.
+  const withMini = svg(0, 40, 1)
+  expect(at(withMini, 12, 3)).toBe('#8a8f98')
+  expect(at(withMini, 17, 2)).toBe('#d77757')
 })
