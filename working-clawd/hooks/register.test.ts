@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { checklist, describeCommand, frame, svg, ticker } from './register.tsx'
+import { checklist, describeCommand, frame, status, svg, ticker } from './register.tsx'
 
 const ORANGE = 0xd77757
 const DEFAULT = 0x01000000
@@ -39,7 +39,9 @@ const leftmost = (cells: string, columns = COLUMNS) => {
 const engine = (on: On) => {
   const periods: number[] = []
   const blits: string[] = []
+  const clock = { now: 0 }
   let release = () => {}
+  on('clock.now', () => ({ value: clock.now }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
@@ -58,7 +60,7 @@ const engine = (on: On) => {
     await new Promise<void>(resolve => (release = resolve))
     return { value: undefined }
   })
-  return { periods, blits, tick: () => release() }
+  return { periods, blits, clock, tick: () => release() }
 }
 
 const mount = ($: Engine, surface: 'terminal' | 'desktop' | 'vscode', bodyColumns = 100) =>
@@ -215,15 +217,14 @@ test('the desktop scene: he sits at the right end at his laptop, minis to his le
   expect(cell(source, 26, 13)).toBe('#d77757')
   // He blinks every 16th frame.
   expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
-  // His two thin arms take turns pressing a cell down onto the laptop's
-  // base: on even frames the front arm is down and the back one up.
-  expect(cell(source, 9, 12)).toBe('#d77757')
-  expect(cell(source, 9, 5)).toBeUndefined()
-  expect(cell(source, 10, 5)).toBe('#d77757')
-  expect(cell(source, 10, 12)).toBeUndefined()
-  expect(cell(source, 8, 8)).toBeUndefined()
-  expect(cell(svg(1, 40), 10, 12)).toBe('#d77757')
-  expect(cell(svg(1, 40), 9, 5)).toBe('#d77757')
+  // His two thin arms bend down and left to the keys and take turns pressing
+  // a cell down: on even frames the front arm reaches the laptop's base.
+  expect(cell(source, 6, 12)).toBe('#d77757')
+  expect(cell(source, 9, 11)).toBe('#d77757')
+  expect(cell(source, 9, 12)).toBeUndefined()
+  expect(cell(svg(1, 40), 6, 11)).toBe('#d77757')
+  expect(cell(svg(1, 40), 6, 12)).toBeUndefined()
+  expect(cell(svg(1, 40), 9, 12)).toBe('#d77757')
   // Each mini is smaller with its own laptop; one that does not fit is left out.
   const sprites = (markup: string) => markup.split('<g transform').length - 1
   expect(sprites(svg(0, 40, 1))).toBe(1)
@@ -259,9 +260,11 @@ test("the band follows the main loop's task list, not a subagent's", async ($, o
   await call({ tool: 'TaskUpdate', taskId: '1', status: 'in_progress' })
   await call({ tool: 'Bash', command: 'npm test' })
 
-  // Desktop: the task beside him, the command ticker to its left.
+  // Desktop: the task, then the app's status beside him, the command ticker
+  // to the left of both.
   let ui = await mount($, 'desktop')
-  expect(await ui.find({ type: 'Text', text: /^Drawing the hands {2}0 of 2$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Drawing the hands' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /0s \u00b7 Working$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Bash npm test {3}/ })).toBeDefined()
   await ui.unmount()
 
@@ -285,4 +288,27 @@ test('commands read as the tool and its main argument, and the ticker scrolls th
   expect(ticker(['Bash a', 'Read b'], 18)).toBe(ticker(['Bash a', 'Read b'], 0))
   // The band hands it its own width.
   expect(ticker(['Bash a'], 0, 100)).toHaveLength(100)
+})
+
+test("the app's spinner status shows just left of him: elapsed time and what it is doing", async ($, on) => {
+  expect(status(20, { word: 'Working', message: null, mode: 'thinking' })).toBe('20s \u00b7 Thinking')
+  expect(status(3, { word: 'Creating notes.md', message: null, mode: 'tool-use' })).toBe('3s \u00b7 Creating notes.md')
+  expect(status(0)).toBe('0s \u00b7 Working')
+
+  const { clock } = engine(on)
+  clock.now = 1_000
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  const spinner = await $.ui.mount({
+    plugin: 'working-clawd',
+    surface: 'desktop',
+    component: 'Spinner',
+    props: { word: 'Working', message: null, suffix: '\u2026', mode: 'thinking' } as never,
+    viewport: { columns: 120, rows: 40 },
+  })
+  await spinner.unmount()
+  clock.now = 21_400
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: /^\u2022 {2} 20s \u00b7 Thinking$/ })).toBeDefined()
+  await ui.unmount()
+  await complete($, 't1')
 })

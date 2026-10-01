@@ -31,8 +31,8 @@ const ORANGE = 0xd77757
 const LAPTOP = '#9a9c9f'
 // The desktop Clawd, drawn the way the app's own one is: seen from the side,
 // facing left, his head over his face with one eye (E, a hole), and two thin
-// arms, front (F) and back (B), reaching straight down to the keys of a
-// laptop (g) whose lid tilts back and whose base sits on the ground. His four legs
+// arms, front (F) and back (B), bending down and left from his body to the
+// keys of a laptop (g) whose lid tilts back and whose base sits on the ground. His four legs
 // bend a little at the knee. 28 cells by 14.
 const SIDE = [
   '...........OOOOOOOOOOOOOOOO.',
@@ -40,13 +40,13 @@ const SIDE = [
   '...........OOOOOOOOOOOOOOOO.',
   '.............OOOOOOEEOOOOOO.',
   '.............OOOOOOEEOOOOOO.',
-  '.........FBOOOOOOOOOOOOOOOO.',
-  '.........FBOOOOOOOOOOOOOOOO.',
-  '.........FBOOOOOOOOOOOOOOOO.',
-  'g........FBOOOOOOOOOOOOOOOO.',
-  'gg.......FBOOOOOOOOOOOOOOOO.',
-  '.gg......FBOOOOOOOOOOOOOOOO.',
-  '..gg.....FB.OO..OO..OO..OO..',
+  '...........OOOOOOOOOOOOOOOO.',
+  '...........OOOOOOOOOOOOOOOO.',
+  '..........FOOOOOOOOOOOOOOOO.',
+  'g........F.OOOOOOOOOOOOOOOO.',
+  'gg......F..OOOOOOOOOOOOOOOO.',
+  '.gg....F..BOOOOOOOOOOOOOOOO.',
+  '..gg..F..B..OO..OO..OO..OO..',
   '...ggg......OOO.OOO.OOO.OOO.',
   '....ggggggg..OO..OO..OO..OO.',
 ]
@@ -174,6 +174,11 @@ export const checklist = (list: WorkingTasks) => {
   return { count: `${done} of ${all.length}`, now: active && (active.activeForm ?? active.subject) }
 }
 
+// The status the app's own spinner shows, "20s · Thinking": the turn's
+// elapsed time and what it is doing, Thinking while the model thinks.
+export const status = (seconds: number, shown?: { word: string; message: string | null; mode: string }) =>
+  `${seconds}s \u00b7 ${shown?.mode === 'thinking' ? 'Thinking' : (shown?.message ?? shown?.word ?? 'Working')}`
+
 // "Bash npm test", "Edit register.tsx": the tool and its main argument, a file
 // by its name, cut to one short line.
 export const describeCommand = (call: Record<string, unknown>) => {
@@ -196,6 +201,10 @@ export const ticker = (list: string[], t: number, width = TICKER) => {
 let timer: Timer | undefined
 let tick = 0
 let band: { id: string; surface: string; columns: number; minis: number; hasLeader: boolean } | undefined
+// When the main turn began, and what the app's own spinner last said it was
+// doing: the band repeats both beside him.
+let startedAt = 0
+let spinner: { word: string; message: string | null; mode: string } | undefined
 
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
@@ -227,6 +236,7 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     if (!timer) tick = 0
+    startedAt = await $.clock.now()
     await update($, working, () => e.turnId)
     await update($, commands, () => [])
     start($)
@@ -298,6 +308,12 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The app's own spinner, read as it draws and passed through unchanged.
+  on('ui.render', { component: 'Spinner' }, ($, e, next) => {
+    spinner = { word: e.props.word, message: e.props.message, mode: e.props.mode }
+    return next(e)
+  })
+
   // The band spans the window, so a resize redraws it at the new width. The
   // terminal draws cells; the desktop app, which has no Raster, an SVG.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -309,6 +325,13 @@ export const register: Register = on => {
     const progress = checklist(await read($, tasks))
     const recent = await read($, commands)
     const { Box, Text } = $.ui.resolve(e)
+    const seconds = Math.max(0, Math.floor(((await $.clock.now()) - startedAt) / 1000))
+    const statusLine = hasLeader && (
+      <Text wrap="truncate">
+        <Text color={`#${ORANGE.toString(16)}`}>{'\u2022'.repeat(1 + mod(tick, 3)).padEnd(3)}</Text>
+        <Text dimColor> {status(seconds, spinner)}</Text>
+      </Text>
+    )
     const task = progress && (
       <Text wrap="truncate">{progress.now ? `${progress.now}  ` : ''}<Text dimColor>{progress.count}</Text></Text>
     )
@@ -321,7 +344,8 @@ export const register: Register = on => {
           <Box flexGrow={1} flexShrink={1} marginRight={3}>
             <Text dimColor wrap="truncate">{ticker(recent, tick, columns)}</Text>
           </Box>
-          <Box flexShrink={1} marginRight={1}>{task}</Box>
+          {progress?.now && <Box flexShrink={1} marginRight={3}><Text wrap="truncate">{progress.now}</Text></Box>}
+          <Box flexShrink={0} marginRight={1}>{statusLine}</Box>
           <Svg
             source={svg(tick, scene, minis, hasLeader)}
             width={scene * CELL}
