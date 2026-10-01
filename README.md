@@ -16,7 +16,7 @@ For one session:
 claude --plugin-dir ~/Documents/GitHub/ccmods/prose-guard
 ```
 
-For every session, including ones the desktop app starts, list the folders in `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`, separated by `:`. Set `CLAUDE_CODE_PLUGIN_DIR_WATCH` to `1` in the same block, or a desktop session keeps the code it loaded at start and never picks up a change.
+For every session, including ones the desktop app starts, set `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` to `~/Documents/GitHub/ccmods`. Pointing at the parent folder loads every mod in it and works on every OS. A list of single mod folders needs `:` between them on the Mac and Linux and `;` on Windows. Set `CLAUDE_CODE_PLUGIN_DIR_WATCH` to `1` in the same block, or a desktop session keeps the code it loaded at start and never picks up a change.
 
 ## Checking a mod
 
