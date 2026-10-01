@@ -6,6 +6,7 @@ Mods for Claude Code. Each folder is one plugin of function hooks.
 | --- | --- |
 | `prose-guard` | Turns each em dash in a reply into a comma as the reply streams. Refuses writes and shell commands that add an em dash, and prose or commit messages that use British spelling. |
 | `subagent-pane` | A pane listing each subagent with its type, model, effort, task and status. Selecting one shows its whole conversation. Refuses Haiku and a sixth coder running at once. |
+| `working-clawd` | While Claude works on a turn in the terminal, shows Clawd typing on a laptop above the prompt. |
 | `stuck-detector` | When the same test command fails twice in a row, shows a toast and tells the model to ask for a second opinion. |
 
 ## Loading a mod

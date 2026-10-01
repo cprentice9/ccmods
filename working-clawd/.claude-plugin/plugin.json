@@ -1,0 +1,9 @@
+{
+  "name": "working-clawd",
+  "version": "0.1.0",
+  "description": "While Claude works on a turn, shows Clawd typing on a laptop above the prompt in the terminal.",
+  "author": {
+    "name": "cprentice9"
+  },
+  "types": "./types/index.d.ts"
+}
