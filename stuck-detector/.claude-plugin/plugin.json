@@ -1,0 +1,13 @@
+{
+  "name": "stuck-detector",
+  "version": "0.1.0",
+  "description": "Notices when the same test command fails twice in a row and tells the model to ask for a second opinion.",
+  "userConfig": {
+    "note": {
+      "type": "string",
+      "title": "Note to the model",
+      "description": "Added to the result of a test command that has failed twice in a row.",
+      "default": "This test command has failed twice in a row. Stop fixing and ask for a second opinion: brief the second-opinion and second-opinion-sonnet agents with the symptom, what you tried, what each attempt showed, and the files to read first."
+    }
+  }
+}
