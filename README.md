@@ -1,0 +1,30 @@
+# ccmods
+
+Mods for Claude Code. Each folder is one plugin of function hooks.
+
+| Mod | What it does |
+| --- | --- |
+| `prose-guard` | Refuses writes, shell commands and replies that add an em dash, and prose or commit messages that use British spelling. |
+| `subagent-pane` | A pane listing each subagent with its type, model, effort, task and status. Refuses Haiku and a sixth coder running at once. |
+| `stuck-detector` | When the same test command fails twice in a row, shows a toast and tells the model to ask for a second opinion. |
+| `model-spend` | A status line with the session's tokens per model family, each model's share, and the total cost. |
+
+## Loading a mod
+
+For one session:
+
+```bash
+claude --plugin-dir ~/Documents/GitHub/ccmods/prose-guard
+```
+
+For every session, including ones the desktop app starts, list the folders in `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`, separated by `:`.
+
+## Checking a mod
+
+```bash
+claude plugin validate prose-guard
+```
+
+```bash
+claude plugin test prose-guard
+```
