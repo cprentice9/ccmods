@@ -57,7 +57,9 @@ export const register: Register = (on, options) => {
     failures.set(key, count)
     if (count !== 2) return ran
 
-    const short = command.length > 50 ? `${command.slice(0, 49)}…` : command
+    // Name the test command itself, not a `cd somewhere &&` in front of it.
+    const shown = command.slice(command.search(TEST_PATTERN)).replace(/^[;&|(\s]+/, '')
+    const short = shown.length > 50 ? `${shown.slice(0, 49)}…` : shown
     $.ui.toast(`Failed twice in a row: ${short}`)
     return { ...ran, context: [...(ran.context ?? []), String(options.note)] }
   })

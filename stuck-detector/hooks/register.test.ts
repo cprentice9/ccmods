@@ -41,6 +41,14 @@ describe('stuck-detector', () => {
     expect(toasts).toEqual(['Failed twice in a row: npm test'])
   })
 
+  test('the toast names the test command, not a cd in front of it', async ($, on) => {
+    const command = 'cd /some/long/project/path && uv run pytest -x'
+    const toasts = setup(on, new Set([command]))
+    await bash($, command)
+    await bash($, command)
+    expect(toasts).toEqual(['Failed twice in a row: uv run pytest -x'])
+  })
+
   test('the note comes from the userConfig option', { options: { note: 'Ask for help.' } }, async ($, on) => {
     setup(on, new Set(['cargo test']))
     await bash($, 'cargo test')
