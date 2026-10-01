@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { WorkingTurn } from '../types'
+import type { WorkingTask, WorkingTasks, WorkingTurn } from '../types'
 
 const KEY = 'clawd'
 const BIG = 18
@@ -19,6 +19,11 @@ const TICK_MS = 150
 const CELL = 2
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
+const tasks = atom({ plugin: 'working-clawd', key: 'tasks' } as const, {} as WorkingTasks)
+const commands = atom({ plugin: 'working-clawd', key: 'commands' } as const, [] as string[])
+const MAX_COMMANDS = 8
+// Characters of the command ticker shown at once.
+const TICKER = 40
 
 const CLEAR = -1
 const DEFAULT = 0x01000000
@@ -27,29 +32,30 @@ const LAPTOP = '#9a9c9f'
 // The desktop Clawd, drawn the way the app's own one is: seen from the side,
 // facing left, his head over his face with one eye (E, a hole), his front (F)
 // and back (B) hands out in front of him over a laptop (g) whose lid tilts
-// back and whose base sits on the ground. His four legs bend a little at the
-// knee. 28 cells by 14.
+// back and whose base sits on the ground; a pressed hand lands on its keys. His four legs
+// bend a little at the knee. 28 cells by 14.
 const SIDE = [
   '...........OOOOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
   '.............OOOOOOEEOOOOOO.',
   '.............OOOOOOEEOOOOOO.',
-  '........FFBBOOOOOOOOOOOOOOO.',
-  '........FFBBOOOOOOOOOOOOOOO.',
-  '........FFBBOOOOOOOOOOOOOOO.',
-  'g.......FFBBOOOOOOOOOOOOOOO.',
-  'gg......FFBBOOOOOOOOOOOOOOO.',
-  '.gg.......BBOOOOOOOOOOOOOOO.',
-  '..gg.......OO..OO...OO..OO..',
-  '...ggg.....OOO.OOO..OOO.OOO.',
-  '....ggggggg.OO..OO...OO..OO.',
+  '.......FFBBOOOOOOOOOOOOOOOO.',
+  '.......FFBBOOOOOOOOOOOOOOOO.',
+  '.......FFBBOOOOOOOOOOOOOOOO.',
+  'g......FFBBOOOOOOOOOOOOOOOO.',
+  'gg.....FFBBOOOOOOOOOOOOOOOO.',
+  '.gg....FFBBOOOOOOOOOOOOOOOO.',
+  '..gg...FFBB.OO..OO..OO..OO..',
+  '...ggg......OOO.OOO.OOO.OOO.',
+  '....ggggggg..OO..OO..OO..OO.',
 ]
 const SIDE_COLUMNS = SIDE[0]!.length
 const SIDE_ROWS = SIDE.length
-// How wide the desktop drawing is in cells: wider than any window, so the
-// app scales it by its height and he keeps his size, anchored right.
-const VIEW_COLUMNS = 2000
+const MINI_SCALE = 0.6
+const MINI_STEP = SIDE_COLUMNS * MINI_SCALE + 1
+// The desktop drawing's width in cells: him and each mini to his left.
+const sceneColumns = (minis: number) => SIDE_COLUMNS + Math.min(minis, MAX_MINIS) * MINI_STEP
 
 const mod = (n: number, m: number) => ((n % m) + m) % m
 
@@ -129,15 +135,15 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
 }
 
 // One Clawd at his laptop as SVG cells, scaled by `s` (a mini is smaller).
-// His hands take turns dipping a cell as he types, and he blinks every 16th
-// frame.
+// His hands take turns pressing a cell down onto the keys as he types, and
+// he blinks every 16th frame.
 const clawdAtLaptop = (left: number, top: number, s: number, t: number) => {
   const orange = `#${ORANGE.toString(16)}`
-  const isFrontDown = mod(t, 2) === 0
+  const pressed = mod(t, 2) === 0 ? 'F' : 'B'
   const cells: string[] = []
   SIDE.forEach((row, y) => [...row].forEach((ch, x) => {
     if (ch === '.' || (ch === 'E' && mod(t, 16) !== 15)) return
-    const dip = (ch === 'F' && isFrontDown) || (ch === 'B' && !isFrontDown) ? 1 : 0
+    const dip = ch === pressed ? 1 : 0
     cells.push(`<rect x="${x}" y="${y + dip}" width="1.02" height="1.02" fill="${ch === 'g' ? LAPTOP : orange}"/>`)
   }))
   return `<g transform="translate(${left} ${top}) scale(${s})">${cells.join('')}</g>`
@@ -149,15 +155,41 @@ const clawdAtLaptop = (left: number, top: number, s: number, t: number) => {
 export const svg = (t: number, columns: number, minis = 0, hasLeader = true) => {
   const seat = columns - SIDE_COLUMNS
   const parts = hasLeader ? [clawdAtLaptop(seat, 0, 1, t)] : []
-  const scale = 0.6
-  const step = SIDE_COLUMNS * scale + 1
   for (let i = 0; i < Math.min(minis, MAX_MINIS); i++) {
-    const left = seat - step * (i + 1)
-    if (left >= 0) parts.push(clawdAtLaptop(left, SIDE_ROWS * (1 - scale), scale, t))
+    const left = seat - MINI_STEP * (i + 1)
+    if (left >= 0) parts.push(clawdAtLaptop(left, SIDE_ROWS * (1 - MINI_SCALE), MINI_SCALE, t))
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * CELL}" height="${SIDE_ROWS * CELL}" `
     + `viewBox="0 0 ${columns} ${SIDE_ROWS}" preserveAspectRatio="xMaxYMax slice" shape-rendering="crispEdges">`
     + `${parts.join('')}</svg>`
+}
+
+// The checklist line: how many tasks are done, and the one in progress.
+// Nothing while the list is empty.
+export const checklist = (list: WorkingTasks) => {
+  const all = Object.values(list)
+  if (all.length === 0) return undefined
+  const done = all.filter(task => task.status === 'completed').length
+  const active = all.find(task => task.status === 'in_progress')
+  return { count: `${done} of ${all.length}`, now: active && (active.activeForm ?? active.subject) }
+}
+
+// "Bash npm test", "Edit register.tsx": the tool and its main argument, a file
+// by its name, cut to one short line.
+export const describeCommand = (call: Record<string, unknown>) => {
+  const main = [call.command, call.file_path, call.pattern, call.url, call.query, call.description]
+    .find(v => typeof v === 'string') as string | undefined
+  const what = main === undefined ? '' : main === call.file_path ? main.split('/').pop()! : main.split('\n')[0]!
+  return `${String(call.tool)} ${what}`.trim().slice(0, 60)
+}
+
+// The ticker's window at frame t: the commands in a loop, one character
+// further along each frame.
+export const ticker = (list: string[], t: number) => {
+  if (list.length === 0) return ''
+  const loop = `${list.join('   ')}   `
+  const from = mod(t, loop.length)
+  return loop.repeat(Math.ceil((from + TICKER) / loop.length)).slice(from, from + TICKER)
 }
 
 // What the band last drew, for the timer's repaints between draws.
@@ -196,6 +228,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (!timer) tick = 0
     await update($, working, () => e.turnId)
+    await update($, commands, () => [])
     start($)
     return next(e)
   })
@@ -220,6 +253,40 @@ export const register: Register = on => {
     return yield* next(e)
   })
 
+  // The main loop's TaskCreate and TaskUpdate calls keep the checklist.
+  // Its other calls feed the command ticker as they start.
+  on('tool.call', async ($, e, next) => {
+    const call = e as unknown as Record<string, any>
+    if (!call.agentId && !/^(Task|TodoWrite|SubagentHandback)/.test(String(call.tool))) {
+      const line = describeCommand(call)
+      await update($, commands, list => [...list, line].slice(-MAX_COMMANDS))
+    }
+    const ran = await next(e)
+    const result = ran.result as Record<string, any> | undefined
+    if (call.agentId || ran.isError) return ran
+    if (call.tool === 'TaskCreate' && result?.task?.id) {
+      const task: WorkingTask = { subject: String(result.task.subject), status: 'pending' }
+      if (typeof call.activeForm === 'string') task.activeForm = call.activeForm
+      await update($, tasks, list => ({ ...list, [String(result.task.id)]: task }))
+    } else if (call.tool === 'TaskUpdate' && result?.success !== false) {
+      const id = String(call.taskId)
+      await update($, tasks, list => {
+        const task = list[id]
+        if (!task) return list
+        if (call.status === 'deleted') {
+          const { [id]: _, ...rest } = list
+          return rest
+        }
+        const changed: WorkingTask = { ...task }
+        if (typeof call.subject === 'string') changed.subject = call.subject
+        if (typeof call.activeForm === 'string') changed.activeForm = call.activeForm
+        if (call.status === 'pending' || call.status === 'in_progress' || call.status === 'completed') changed.status = call.status
+        return { ...list, [id]: changed }
+      })
+    }
+    return ran
+  })
+
   on('turn.complete', async ($, e, next) => {
     const { agentId } = e
     if (agentId) {
@@ -239,15 +306,45 @@ export const register: Register = on => {
     const columns = Math.min(e.props.bodyColumns, MAX_COLUMNS)
     const isIdle = !hasLeader && minis === 0
     if (isIdle || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
+    const progress = checklist(await read($, tasks))
+    const recent = await read($, commands)
+    const { Box, Text } = $.ui.resolve(e)
+    const task = progress && (
+      <Text wrap="truncate">{progress.now ? `${progress.now}  ` : ''}<Text dimColor>{progress.count}</Text></Text>
+    )
     if (e.surface === 'desktop') {
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
       const { Svg } = $.ui.resolve(e)
-      const source = svg(tick, VIEW_COLUMNS, minis, hasLeader)
-      return <Svg source={source} height={SIDE_ROWS * CELL} alt="Clawd typing on a laptop while Claude works" />
+      const scene = sceneColumns(minis)
+      return (
+        <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" width={columns}>
+          <Box flexShrink={1} marginRight={3}>
+            <Text dimColor wrap="truncate">{ticker(recent, tick)}</Text>
+          </Box>
+          <Box flexShrink={1} marginRight={1}>{task}</Box>
+          <Svg
+            source={svg(tick, scene, minis, hasLeader)}
+            width={scene * CELL}
+            height={SIDE_ROWS * CELL}
+            alt="Clawd typing on a laptop while Claude works"
+          />
+        </Box>
+      )
     }
     if (e.surface !== 'terminal') return next(e)
     band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
     const { Raster } = $.ui.resolve(e)
-    return <Raster key={KEY} columns={columns} rows={ROWS} cells={frame(tick, columns, minis, hasLeader)} />
+    const latest = recent.at(-1)
+    return (
+      <Box flexDirection="column">
+        {(task || latest) && (
+          <Box flexDirection="row">
+            {latest && <Box flexShrink={1} marginRight={3}><Text dimColor wrap="truncate">{latest}</Text></Box>}
+            {task}
+          </Box>
+        )}
+        <Raster key={KEY} columns={columns} rows={ROWS} cells={frame(tick, columns, minis, hasLeader)} />
+      </Box>
+    )
   })
 }

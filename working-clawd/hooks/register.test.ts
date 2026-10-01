@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { frame, svg } from './register.tsx'
+import { checklist, describeCommand, frame, svg, ticker } from './register.tsx'
 
 const ORANGE = 0xd77757
 const DEFAULT = 0x01000000
@@ -185,7 +185,7 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
   const drawn = await desktop.find({ type: 'Svg' })
-  expect(drawn?.props).toMatchObject({ source: svg(0, 2000, 0, true), height: 28 })
+  expect(drawn?.props).toMatchObject({ source: svg(0, 28, 0, true), width: 56, height: 28 })
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
@@ -215,15 +215,71 @@ test('the desktop scene: he sits at the right end at his laptop, minis to his le
   expect(cell(source, 26, 13)).toBe('#d77757')
   // He blinks every 16th frame.
   expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
-  // His hands take turns dipping a cell: on even frames the front one is down.
-  expect(cell(source, 8, 10)).toBe('#d77757')
-  expect(cell(source, 8, 5)).toBeUndefined()
-  expect(cell(svg(1, 40), 8, 5)).toBe('#d77757')
-  expect(cell(svg(1, 40), 10, 11)).toBe('#d77757')
+  // His hands take turns pressing a cell down onto the laptop's base: on
+  // even frames the front hand is down and the back one up.
+  expect(cell(source, 7, 12)).toBe('#d77757')
+  expect(cell(source, 7, 5)).toBeUndefined()
+  expect(cell(source, 9, 5)).toBe('#d77757')
+  expect(cell(source, 9, 12)).toBeUndefined()
+  expect(cell(svg(1, 40), 9, 12)).toBe('#d77757')
+  expect(cell(svg(1, 40), 7, 5)).toBe('#d77757')
   // Each mini is smaller with its own laptop; one that does not fit is left out.
   const sprites = (markup: string) => markup.split('<g transform').length - 1
   expect(sprites(svg(0, 40, 1))).toBe(1)
   expect(sprites(svg(0, 60, 1))).toBe(2)
   expect(sprites(svg(0, 60, 3))).toBe(2)
   expect(sprites(svg(0, 70, 3))).toBe(3)
+})
+
+test('the checklist line counts done tasks and names the one in progress', () => {
+  expect(checklist({})).toBeUndefined()
+  expect(checklist({
+    1: { subject: 'Draw the hands', status: 'completed' },
+    2: { subject: 'Add the checklist', status: 'in_progress', activeForm: 'Adding the checklist' },
+    3: { subject: 'Push', status: 'pending' },
+  })).toEqual({ count: '1 of 3', now: 'Adding the checklist' })
+  expect(checklist({ 1: { subject: 'Push', status: 'in_progress' } })?.now).toBe('Push')
+})
+
+test("the band follows the main loop's task list, not a subagent's", async ($, on) => {
+  engine(on)
+  let next = 0
+  on('tool.call', (_$, e) => {
+    const call = e as unknown as Record<string, any>
+    return call.tool === 'TaskCreate'
+      ? { result: { task: { id: String(++next), subject: call.subject } }, text: 'ok' }
+      : { result: { success: true, taskId: call.taskId, updatedFields: [] }, text: 'ok' }
+  })
+  const call = (input: Record<string, unknown>) => $.tool.call(input as never)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await call({ tool: 'TaskCreate', subject: 'Draw the hands', description: 'x', activeForm: 'Drawing the hands' })
+  await call({ tool: 'TaskCreate', subject: 'Add the checklist', description: 'x' })
+  await call({ tool: 'TaskCreate', subject: 'Not mine', description: 'x', agentId: 'a1' })
+  await call({ tool: 'TaskUpdate', taskId: '1', status: 'in_progress' })
+  await call({ tool: 'Bash', command: 'npm test' })
+
+  // Desktop: the task beside him, the command ticker to its left.
+  let ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: /^Drawing the hands {2}0 of 2$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Bash npm test {3}/ })).toBeDefined()
+  await ui.unmount()
+
+  await call({ tool: 'TaskUpdate', taskId: '1', status: 'completed' })
+  await call({ tool: 'TaskUpdate', taskId: '2', status: 'deleted' })
+  ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /^1 of 1$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Bash npm test' })).toBeDefined()
+  await ui.unmount()
+  await complete($, 't1')
+})
+
+test('commands read as the tool and its main argument, and the ticker scrolls them', () => {
+  expect(describeCommand({ tool: 'Bash', command: 'npm test\n--verbose' })).toBe('Bash npm test')
+  expect(describeCommand({ tool: 'Edit', file_path: '/src/hooks/register.tsx' })).toBe('Edit register.tsx')
+  expect(describeCommand({ tool: 'TaskList' })).toBe('TaskList')
+  expect(ticker([], 0)).toBe('')
+  // One character further along each frame, looping back to the start.
+  expect(ticker(['Bash a', 'Read b'], 0)).toBe('Bash a   Read b   Bash a   Read b   Bash')
+  expect(ticker(['Bash a', 'Read b'], 1)).toBe('ash a   Read b   Bash a   Read b   Bash ')
+  expect(ticker(['Bash a', 'Read b'], 18)).toBe(ticker(['Bash a', 'Read b'], 0))
 })
