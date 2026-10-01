@@ -30,7 +30,7 @@ const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
 const LAPTOP = '#9a9c9f'
 // The desktop Clawd, drawn the way the app's own one is: seen from the side,
-// facing left, his head over his face with one eye (E, a hole), at a laptop
+// facing left, his head over his face, at a laptop
 // (g) whose lid tilts back and whose base sits on the ground. His legs stand
 // in two pairs, each foot a step back. His four legs
 // bend a little at the knee. 28 cells by 14.
@@ -38,8 +38,8 @@ const SIDE = [
   '...........OOOOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
-  '.............OOOOOOEEOOOOOO.',
-  '.............OOOOOOEEOOOOOO.',
+  '.............OOOOOOOOOOOOOO.',
+  '.............OOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
   '...........OOOOOOOOOOOOOOOO.',
@@ -55,6 +55,10 @@ const SIDE = [
 // top left cell, one per frame.
 const HAND = 3
 const HAND_PATH = [[8, 6], [7, 8], [8, 10], [9, 8]] as const
+// His eye, a 2 by 2 hole, reads the screen: across a line toward it and back,
+// then down a row and across again, holding each spot for EYE_HOLD frames.
+const EYE_PATH = [[16, 3], [17, 3], [18, 3], [19, 3], [16, 4], [17, 4], [18, 4], [19, 4]] as const
+const EYE_HOLD = 3
 const SIDE_COLUMNS = SIDE[0]!.length
 const SIDE_ROWS = SIDE.length
 const MINI_SCALE = 0.6
@@ -140,14 +144,17 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
 }
 
 // One Clawd at his laptop as SVG cells, scaled by `s` (a mini is smaller).
-// His hands circle as he types, and he blinks every 16th frame.
+// His hands circle as he types, his eye scans the screen, and he blinks
+// every 16th frame.
 const clawdAtLaptop = (left: number, top: number, s: number, t: number) => {
   const orange = `#${ORANGE.toString(16)}`
   const cell = (x: number, y: number, fill: string) =>
     `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="${fill}"/>`
+  const [ex, ey] = EYE_PATH[mod(Math.floor(t / EYE_HOLD), EYE_PATH.length)]!
+  const isEye = (x: number, y: number) => mod(t, 16) !== 15 && x - ex >= 0 && x - ex < 2 && y - ey >= 0 && y - ey < 2
   const cells: string[] = []
   SIDE.forEach((row, y) => [...row].forEach((ch, x) => {
-    if (ch === '.' || (ch === 'E' && mod(t, 16) !== 15)) return
+    if (ch === '.' || isEye(x, y)) return
     cells.push(cell(x, y, ch === 'g' ? LAPTOP : orange))
   }))
   for (const [hx, hy] of [HAND_PATH[mod(t, 4)]!, HAND_PATH[mod(t + 2, 4)]!]) {

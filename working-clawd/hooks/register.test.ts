@@ -206,7 +206,7 @@ test('the desktop scene: he sits at the right end at his laptop, minis to his le
   expect(source).toContain('<g transform="translate(12 0) scale(1)">')
   // The top of his head, his eye as a hole, and his laptop's base.
   expect(cell(source, 11, 0)).toBe('#d77757')
-  expect(cell(source, 19, 3)).toBeUndefined()
+  expect(cell(source, 16, 3)).toBeUndefined()
   expect(cell(source, 4, 13)).toBe('#9a9c9f')
   // His legs stand in two pairs with a gap between, each foot a step back.
   expect(cell(source, 12, 11)).toBe('#d77757')
@@ -216,8 +216,13 @@ test('the desktop scene: he sits at the right end at his laptop, minis to his le
   expect(cell(source, 21, 11)).toBe('#d77757')
   expect(cell(source, 12, 13)).toBeUndefined()
   expect(cell(source, 13, 13)).toBe('#d77757')
-  // He blinks every 16th frame.
-  expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
+  // His eye scans the screen: a step along the line every 3 frames, then down
+  // a row; and he blinks every 16th frame.
+  expect(cell(source, 19, 3)).toBe('#d77757')
+  expect(cell(svg(3, 40), 16, 3)).toBe('#d77757')
+  expect(cell(svg(3, 40), 17, 3)).toBeUndefined()
+  expect(cell(svg(12, 40), 16, 5)).toBeUndefined()
+  expect(cell(svg(15, 40), 17, 4)).toBe('#d77757')
   // His hands circle half a turn apart: on frame 0 one is up and the other
   // presses the laptop's base; on frame 1 both swing to the middle.
   expect(cell(source, 8, 6)).toBe('#d77757')
