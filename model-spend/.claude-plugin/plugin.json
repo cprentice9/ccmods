@@ -1,9 +1,0 @@
-{
-  "name": "model-spend",
-  "version": "0.1.0",
-  "description": "Pins a status line with each model family's share of this session's spend and its total cost.",
-  "author": {
-    "name": "cprentice9"
-  },
-  "types": "./types/index.d.ts"
-}
