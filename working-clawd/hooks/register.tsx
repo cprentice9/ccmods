@@ -20,10 +20,11 @@ const ROWS = HEIGHT / 2
 // The clips' own rate, 12 frames a second; the terminal walker steps every
 // other frame.
 const TICK_MS = 83
-// The desktop band, in CSS pixels: a half pixel of Clawd, and a guess at one
-// of the band's columns, to know how far he can walk.
-const HALF = 2
-const COLUMN = 8
+// The desktop band, in CSS pixels: a half pixel of Clawd, and one of the
+// band's columns as measured from a screenshot, to know how far he can walk.
+// Too wide a guess and the app shrinks the whole drawing to fit.
+const HALF = 2.5
+const COLUMN = 6
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 const tasks = atom({ plugin: 'working-clawd', key: 'tasks' } as const, {} as WorkingTasks)
