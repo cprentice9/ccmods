@@ -187,6 +187,20 @@ describe('the blocked counter', () => {
     expect(lines.at(-1)).toBe('1 em dash blocked')
   })
 
+  test('a store that fails shows a toast and the call is still denied', async ($, on) => {
+    // No store hooks: the store call rejects, as a broken store would.
+    engine(on)
+    const toasts: string[] = []
+    on('ui.toast', (_$: any, e: { text: string }) => {
+      toasts.push(e.text)
+      return { value: undefined }
+    })
+    const r = await call($, { tool: 'Bash', command: `echo ${DASH}` })
+    expect(r.deny).toContain('em dash')
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]).toMatch(/^Could not count the blocked em dash: /)
+  })
+
   test('a call that passes counts nothing', async ($, on) => {
     engine(on)
     const { store, lines } = counter(on, 5)

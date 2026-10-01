@@ -8,12 +8,15 @@ const drawCount = async ($: EngineInterface) => {
   if (total > 0) $.ui.status(`${total} ${total === 1 ? 'em dash' : 'em dashes'} blocked`)
 }
 
-// A counter that fails must never let a dash through, so its errors stop here.
+// A counter that fails must never let a dash through, so its errors stop here
+// and show as a toast.
 const tally = async ($: EngineInterface, dashes: number) => {
   try {
     await $.store.set(ALL_TIME, Number((await $.store.get(ALL_TIME)) ?? 0) + dashes)
     await drawCount($)
-  } catch {}
+  } catch (error) {
+    $.ui.toast(`Could not count the blocked em dash: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 const DASH = String.fromCharCode(0x2014)
