@@ -53,24 +53,35 @@ test('a frame is 32 by 4 cells of half blocks, with Clawd in orange', () => {
   const words = new Uint32Array(Uint8Array.fromBase64(frame(0)).buffer)
   expect(words.length).toBe(32 * 4 * 3)
   for (let i = 0; i < words.length; i += 3) expect([0x20, 0x2580, 0x2584]).toContain(words[i])
-  // The top of Clawd's head, row 1: empty above, orange below.
-  expect(cell(frame(0), 5, 1)).toEqual([0x2584, ORANGE, DEFAULT])
+  // Clawd's head starts on the second row of cells.
+  expect(cell(frame(0), 7, 0)).toEqual([0x20, DEFAULT, DEFAULT])
+  expect(cell(frame(0), 7, 1)).toEqual([0x2580, ORANGE, ORANGE])
 })
 
-test('the arms take turns on the keys and each keystroke types a pixel', () => {
-  // Right arm tip: down on the keys on even frames, up on odd ones.
-  expect(cell(frame(0), 16, 3)).toEqual([0x2580, ORANGE, DEFAULT])
-  expect(cell(frame(0), 16, 2)[0]).toBe(0x20)
-  expect(cell(frame(1), 16, 2)).toEqual([0x2584, ORANGE, DEFAULT])
+test('the hands take turns striking the keys, and each keystroke types a pixel', () => {
+  // A hand is one orange pixel at the bottom of its cell, raised or struck.
+  const hand = [0x2584, ORANGE, DEFAULT]
+  const lit = [0x2580, 0xf2f2f2, 0x7d828c]
+  const dark = [0x2580, 0xb4b8bf, 0x7d828c]
+  // Even frames: the left hand strikes and lights its key, the right is raised.
+  expect(cell(frame(0), 1, 2)).toEqual(hand)
+  expect(cell(frame(0), 1, 3)).toEqual(lit)
+  expect(cell(frame(0), 16, 1)).toEqual(hand)
+  expect(cell(frame(0), 16, 3)).toEqual(dark)
+  // Odd frames: the other way around.
+  expect(cell(frame(1), 16, 2)).toEqual(hand)
+  expect(cell(frame(1), 16, 3)).toEqual(lit)
+  expect(cell(frame(1), 1, 1)).toEqual(hand)
+  expect(cell(frame(1), 1, 3)).toEqual(dark)
   // The first pixel of the bottom screen line appears on the first keystroke.
   expect(cell(frame(0), 21, 2)[1]).toBe(0x1f2633)
   expect(cell(frame(1), 21, 2)[1]).not.toBe(0x1f2633)
 })
 
 test('Clawd blinks every 16th frame', () => {
-  // Left eye: a hole above the orange row, filled while blinking.
-  expect(cell(frame(13), 5, 2)).toEqual([0x2584, ORANGE, DEFAULT])
-  expect(cell(frame(15), 5, 2)).toEqual([0x2580, ORANGE, ORANGE])
+  // Left eye: a hole under the top of the head, filled while blinking.
+  expect(cell(frame(13), 5, 1)).toEqual([0x2580, ORANGE, DEFAULT])
+  expect(cell(frame(15), 5, 1)).toEqual([0x2580, ORANGE, ORANGE])
 })
 
 test('the band shows Clawd only while a main turn runs', async ($, on) => {

@@ -16,18 +16,19 @@ const ORANGE = 0xd77757
 const FRAME = 0x5c6370
 const SCREEN = 0x1f2633
 const BASE = 0xb4b8bf
+const KEY_LIT = 0xf2f2f2
 const EDGE = 0x7d828c
 const TEAL = 0x7fb4ca
 const LAVENDER = 0xb4a7d6
 const MUTED = 0x8a8f98
 
-// Clawd as the CLI logo draws him: eyes are holes, arms are drawn per frame.
+// Clawd as the CLI logo draws him, eyes as holes. He sits behind the
+// keyboard, which hides his legs; his arms are drawn per frame.
 const BODY = [
   '...OOOOOOOOOOOO',
   '...OOEOOOOOOEOO',
   '...OOOOOOOOOOOO',
   '...OOOOOOOOOOOO',
-  '....O.O....O.O.',
 ]
 
 // Lines of code on the screen: an indent, then runs of colored pixels.
@@ -50,21 +51,27 @@ const linePixels = (i: number) => {
   return px.slice(0, LINE)
 }
 
-// One frame as Raster cells. Each keystroke adds a pixel to the bottom line
-// of the screen; a full line scrolls up. The arms take turns on the keys, and
+// One frame as Raster cells. The hands take turns: one raised, the other
+// striking the keyboard, where the key it hits lights up. Each keystroke adds
+// a pixel to the bottom line of the screen, a full line scrolls up, and
 // Clawd blinks every 16th frame.
 export const frame = (t: number) => {
   const px = new Int32Array(WIDTH * HEIGHT).fill(CLEAR)
   const set = (x: number, y: number, color: number) => (px[y * WIDTH + x] = color)
 
   BODY.forEach((row, y) => [...row].forEach((ch, x) => {
-    if (ch === 'O' || (ch === 'E' && t % 16 === 15)) set(x, y + 3, ORANGE)
+    if (ch === 'O' || (ch === 'E' && t % 16 === 15)) set(x, y + 2, ORANGE)
   }))
-  const isLeftUp = t % 2 === 0
-  set(2, 5, ORANGE)
-  set(1, isLeftUp ? 5 : 6, ORANGE)
-  set(15, 5, ORANGE)
-  set(16, isLeftUp ? 6 : 5, ORANGE)
+  for (let x = 0; x < WIDTH; x++) {
+    set(x, 6, BASE)
+    set(x, 7, EDGE)
+  }
+  const [down, up] = t % 2 === 0 ? [1, 16] : [16, 1]
+  set(2, 4, ORANGE)
+  set(15, 4, ORANGE)
+  set(up, 3, ORANGE)
+  set(down, 5, ORANGE)
+  set(down, 6, KEY_LIT)
 
   for (let x = 20; x < WIDTH; x++) {
     set(x, 0, FRAME)
@@ -81,10 +88,6 @@ export const frame = (t: number) => {
     if (i < 0) continue
     const code = linePixels(i).slice(0, row === 3 ? t % LINE : LINE)
     code.forEach((color, x) => set(21 + x, 1 + row, color))
-  }
-  for (let x = 17; x < WIDTH; x++) {
-    set(x, 6, BASE)
-    set(x, 7, EDGE)
   }
 
   // Two pixels per cell: the upper half block takes the top pixel as its
