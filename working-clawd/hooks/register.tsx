@@ -3,6 +3,9 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { WorkingTask, WorkingTasks, WorkingTurn } from '../types'
 
+import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS } from './clips'
+import type { ClipName } from './clips'
+
 const KEY = 'clawd'
 const BIG = 18
 const MINI = 8
@@ -14,54 +17,22 @@ const MIN_COLUMNS = 24
 const MAX_COLUMNS = 512
 const HEIGHT = 6
 const ROWS = HEIGHT / 2
-const TICK_MS = 150
-// CSS pixels per cell of the desktop sprite, a little bigger than the app's own Clawd.
-const CELL = 2
+// The clips' own rate, 12 frames a second; the terminal walker steps every
+// other frame.
+const TICK_MS = 83
+// The desktop band, in CSS pixels: a half pixel of Clawd, and a guess at one
+// of the band's columns, to know how far he can walk.
+const HALF = 1.5
+const COLUMN = 8
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 const tasks = atom({ plugin: 'working-clawd', key: 'tasks' } as const, {} as WorkingTasks)
 const commands = atom({ plugin: 'working-clawd', key: 'commands' } as const, [] as string[])
 const MAX_COMMANDS = 8
-// Characters of the command ticker by default; the band gives it its width.
-const TICKER = 40
 
 const CLEAR = -1
 const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
-const LAPTOP = '#9a9c9f'
-// The desktop Clawd, drawn the way the app's own one is: seen from the side,
-// facing left, his head over his face with one eye (E, a hole), at a laptop
-// (g) whose lid tilts back and whose base sits on the ground. His legs stand
-// in two pairs, each foot a step back. His four legs
-// bend a little at the knee. 28 cells by 14.
-const SIDE = [
-  '...........OOOOOOOOOOOOOOOO.',
-  '...........OOOOOOOOOOOOOOOO.',
-  '...........OOOOOOOOOOOOOOOO.',
-  '.............OOOOOOEEOOOOOO.',
-  '.............OOOOOOEEOOOOOO.',
-  '...........OOOOOOOOOOOOOOOO.',
-  '...........OOOOOOOOOOOOOOOO.',
-  '...........OOOOOOOOOOOOOOOO.',
-  'g..........OOOOOOOOOOOOOOOO.',
-  'gg.........OOOOOOOOOOOOOOOO.',
-  '.gg........OOOOOOOOOOOOOOOO.',
-  '..gg........OO.OO....OO.OO..',
-  '...ggg......OO.OO....OO.OO..',
-  '....ggggggg..OO.OO....OO.OO.',
-]
-// His hands: two small squares circling in front of him, half a turn apart,
-// so one is up while the other presses the keys. Each entry is a square's
-// top left cell, one per frame.
-const HAND = 3
-const HAND_PATH = [[8, 6], [7, 8], [8, 10], [9, 8]] as const
-const SIDE_COLUMNS = SIDE[0]!.length
-const SIDE_ROWS = SIDE.length
-const MINI_SCALE = 0.6
-const MINI_STEP = SIDE_COLUMNS * MINI_SCALE + 1
-// The desktop drawing's width in cells: him and each mini to his left.
-const sceneColumns = (minis: number) => SIDE_COLUMNS + Math.min(minis, MAX_MINIS) * MINI_STEP
-
 const mod = (n: number, m: number) => ((n % m) + m) % m
 
 // Where the walk puts a sprite's center at frame t: one column per frame,
@@ -139,38 +110,6 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
   return new Uint8Array(words.buffer).toBase64()
 }
 
-// One Clawd at his laptop as SVG cells, scaled by `s` (a mini is smaller).
-// His hands circle as he types, and he blinks every 16th frame.
-const clawdAtLaptop = (left: number, top: number, s: number, t: number) => {
-  const orange = `#${ORANGE.toString(16)}`
-  const cell = (x: number, y: number, fill: string) =>
-    `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="${fill}"/>`
-  const cells: string[] = []
-  SIDE.forEach((row, y) => [...row].forEach((ch, x) => {
-    if (ch === '.' || (ch === 'E' && mod(t, 16) !== 15)) return
-    cells.push(cell(x, y, ch === 'g' ? LAPTOP : orange))
-  }))
-  for (const [hx, hy] of [HAND_PATH[mod(t, 4)]!, HAND_PATH[mod(t + 2, 4)]!]) {
-    for (let dy = 0; dy < HAND; dy++) for (let dx = 0; dx < HAND; dx++) cells.push(cell(hx + dx, hy + dy, orange))
-  }
-  return `<g transform="translate(${left} ${top}) scale(${s})">${cells.join('')}</g>`
-}
-
-// A frame as SVG markup for the desktop app, a cell CELL CSS pixels square,
-// with nothing behind him: Clawd at the right end, each mini in a row to his
-// left at its own laptop, as many as fit, all typing in time.
-export const svg = (t: number, columns: number, minis = 0, hasLeader = true) => {
-  const seat = columns - SIDE_COLUMNS
-  const parts = hasLeader ? [clawdAtLaptop(seat, 0, 1, t)] : []
-  for (let i = 0; i < Math.min(minis, MAX_MINIS); i++) {
-    const left = seat - MINI_STEP * (i + 1)
-    if (left >= 0) parts.push(clawdAtLaptop(left, SIDE_ROWS * (1 - MINI_SCALE), MINI_SCALE, t))
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * CELL}" height="${SIDE_ROWS * CELL}" `
-    + `viewBox="0 0 ${columns} ${SIDE_ROWS}" preserveAspectRatio="xMaxYMax slice" shape-rendering="crispEdges">`
-    + `${parts.join('')}</svg>`
-}
-
 // The checklist line: how many tasks are done, and the one in progress.
 // Nothing while the list is empty.
 export const checklist = (list: WorkingTasks) => {
@@ -181,19 +120,6 @@ export const checklist = (list: WorkingTasks) => {
   return { count: `${done} of ${all.length}`, now: active && (active.activeForm ?? active.subject) }
 }
 
-// The status the app's own spinner shows, "20s · Thinking": the turn's
-// elapsed time and what it is doing, Thinking while the model thinks.
-export const status = (seconds: number, shown?: { word: string; message: string | null; mode: string }) =>
-  `${seconds}s \u00b7 ${shown?.mode === 'thinking' ? 'Thinking' : (shown?.message ?? shown?.word ?? 'Working')}`
-
-// The working mark beside the status: four orange dots in a square, turned
-// 30 degrees a frame, a full turn about every two seconds.
-export const workingDots = (t: number) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12">`
-  + `<g transform="rotate(${mod(t * 30, 360)} 6 6)" fill="#${ORANGE.toString(16)}">`
-  + [[3.2, 3.2], [8.8, 3.2], [3.2, 8.8], [8.8, 8.8]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.6"/>`).join('')
-  + '</g></svg>'
-
 // "Bash npm test", "Edit register.tsx": the tool and its main argument, a file
 // by its name, cut to one short line.
 export const describeCommand = (call: Record<string, unknown>) => {
@@ -203,23 +129,78 @@ export const describeCommand = (call: Record<string, unknown>) => {
   return `${String(call.tool)} ${what}`.trim().slice(0, 60)
 }
 
-// The ticker's window at frame t, `width` characters: the commands in a
-// loop, one character further along each frame.
-export const ticker = (list: string[], t: number, width = TICKER) => {
-  if (list.length === 0) return ''
-  const loop = `${list.join('   ')}   `
-  const from = mod(t, loop.length)
-  return loop.repeat(Math.ceil((from + width) / loop.length)).slice(from, from + width)
+// The desktop walker, as the claude.dev blog has him: he walks the band from
+// end to end, turns at each end, and every so often stops to look around,
+// wave, jump, or turn back. Walking and turning frames face right, so heading
+// left draws them mirrored.
+const decode = (frame: string) => frame.split('/').map(row => row.replace(/(\d*)(\D)/g, (_, n, cell) => cell.repeat(Number(n || 1))))
+const FRAMES = Object.fromEntries(Object.entries(CLIPS).map(([name, clip]) => [name, clip.frames.map(decode)])) as Record<ClipName, string[][]>
+const WALK_CYCLE = [2, 3, 4, 5, 6]
+const ACTS: ClipName[] = ['looking', 'waving', 'jumping', 'turning']
+const COLORS: Record<string, string> = { O: '#d97757', S: '#be684d', s: '#774635', d: '#553428' }
+
+export type Walker = {
+  x: number
+  dir: 1 | -1
+  clip: ClipName
+  // The frame within the clip: for walking, steps taken; -1 is the turn from
+  // facing front to the side.
+  at: number
+  // Steps until he stops to do something.
+  until: number
+}
+
+export const startWalker = (): Walker => ({ x: 0, dir: 1, clip: 'walking', at: -1, until: 40 })
+
+// The band's width in half pixels, from its width in columns.
+const viewWidth = (columns: number) => Math.floor((columns * COLUMN) / HALF)
+
+// His next frame. `t` picks the next stop and act, so the walk repeats
+// differently each time without any randomness to test around.
+export const stepWalker = (w: Walker, width: number, t: number): Walker => {
+  const right = Math.max(0, width - CLIP_WIDTH)
+  if (w.clip !== 'walking') {
+    if (w.at + 1 < CLIPS[w.clip].seq.length) return { ...w, at: w.at + 1 }
+    const dir = w.clip === 'turning' ? (-w.dir as 1 | -1) : w.dir
+    return { ...w, dir, clip: 'walking', at: -1, until: 30 + mod(t * 37, 90) }
+  }
+  const x = Math.min(right, Math.max(0, w.x + w.dir))
+  const atEnd = (w.dir > 0 && x >= right) || (w.dir < 0 && x <= 0)
+  if (atEnd) return { ...w, x, clip: 'turning', at: 0 }
+  if (w.until <= 0) return { ...w, x, clip: ACTS[mod(t, ACTS.length)]!, at: 0 }
+  return { ...w, x, at: w.at + 1, until: w.until - 1 }
+}
+
+// His frame as rows of cells, mirrored when he faces left.
+export const walkerFrame = (w: Walker) => {
+  const index = w.clip === 'walking' ? (w.at < 0 ? 1 : WALK_CYCLE[mod(w.at, WALK_CYCLE.length)]!) : CLIPS[w.clip].seq[w.at]!
+  const rows = FRAMES[w.clip][index]!
+  return w.dir < 0 ? rows.map(row => [...row].reverse().join('')) : rows
+}
+
+// The band as SVG markup, `width` half pixels wide: each row's runs of one
+// color as rectangles, his eyes left as holes.
+export const walkerSvg = (w: Walker, width: number) => {
+  const rects: string[] = []
+  walkerFrame(w).forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const fill = COLORS[row[x]!]
+      if (!fill) continue
+      let end = x
+      while (row[end + 1] === row[x]) end++
+      rects.push(`<rect x="${w.x + x}" y="${y}" width="${end - x + 1}" height="1" fill="${fill}"/>`)
+      x = end
+    }
+  })
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width * HALF}" height="${CLIP_HEIGHT * HALF}" `
+    + `viewBox="0 0 ${width} ${CLIP_HEIGHT}" shape-rendering="crispEdges">${rects.join('')}</svg>`
 }
 
 // What the band last drew, for the timer's repaints between draws.
 let timer: Timer | undefined
 let tick = 0
 let band: { id: string; surface: string; columns: number; minis: number; hasLeader: boolean } | undefined
-// When the main turn began, and what the app's own spinner last said it was
-// doing: the band repeats both beside him.
-let startedAt = 0
-let spinner: { word: string; message: string | null; mode: string } | undefined
+let walker = startWalker()
 
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
@@ -228,9 +209,10 @@ function start($: EngineInterface) {
     // The desktop app redraws the SVG; the terminal repaints its cells in
     // place. A frame that cannot be painted is skipped and the next one tries.
     if (band.surface === 'desktop') {
+      walker = stepWalker(walker, viewWidth(band.columns), tick)
       $.ui.invalidate('ui.render')
     } else {
-      const cells = frame(tick, band.columns, band.minis, band.hasLeader)
+      const cells = frame(Math.floor(tick / 2), band.columns, band.minis, band.hasLeader)
       $.ui.blit({ requestId: band.id, key: KEY, cells }).catch(() => {})
     }
   })
@@ -251,7 +233,6 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     if (!timer) tick = 0
-    startedAt = await $.clock.now()
     await update($, working, () => e.turnId)
     await update($, commands, () => [])
     start($)
@@ -279,7 +260,7 @@ export const register: Register = on => {
   })
 
   // The main loop's TaskCreate and TaskUpdate calls keep the checklist.
-  // Its other calls feed the command ticker as they start.
+  // Its other calls feed the latest-command line as they start.
   on('tool.call', async ($, e, next) => {
     const call = e as unknown as Record<string, any>
     if (!call.agentId && !/^(Task|TodoWrite|SubagentHandback)/.test(String(call.tool))) {
@@ -323,57 +304,36 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The app's own spinner, read as it draws and passed through unchanged.
-  on('ui.render', { component: 'Spinner' }, ($, e, next) => {
-    spinner = { word: e.props.word, message: e.props.message, mode: e.props.mode }
-    return next(e)
-  })
-
   // The band spans the window, so a resize redraws it at the new width. The
-  // terminal draws cells; the desktop app, which has no Raster, an SVG.
+  // terminal draws cells; the desktop app, which has no Raster, an SVG of
+  // Clawd walking the band and nothing else.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const hasLeader = (await read($, working)) !== null
     const minis = (await read($, agents)).length
     const columns = Math.min(e.props.bodyColumns, MAX_COLUMNS)
     const isIdle = !hasLeader && minis === 0
     if (isIdle || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
-    const progress = checklist(await read($, tasks))
-    const recent = await read($, commands)
-    const { Box, Text } = $.ui.resolve(e)
-    const seconds = Math.max(0, Math.floor(((await $.clock.now()) - startedAt) / 1000))
-    const task = progress && (
-      <Text wrap="truncate">{progress.now ? `${progress.now}  ` : ''}<Text dimColor>{progress.count}</Text></Text>
-    )
     if (e.surface === 'desktop') {
+      if (!hasLeader) return next(e)
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
       const { Svg } = $.ui.resolve(e)
-      const scene = sceneColumns(minis)
-      const statusLine = hasLeader && (
-        <Box flexDirection="row" alignItems="center">
-          <Svg source={workingDots(tick)} width={12} height={12} alt="Working" />
-          <Box marginLeft={1}><Text dimColor wrap="truncate">{status(seconds, spinner)}</Text></Box>
-        </Box>
-      )
       return (
-        <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" width={columns}>
-          <Box flexGrow={1} flexShrink={1} marginRight={3}>
-            <Text dimColor wrap="truncate">{ticker(recent, tick, columns)}</Text>
-          </Box>
-          {progress?.now && <Box flexShrink={1} marginRight={3}><Text wrap="truncate">{progress.now}</Text></Box>}
-          <Box flexShrink={0} marginRight={1}>{statusLine}</Box>
-          <Svg
-            source={svg(tick, scene, minis, hasLeader)}
-            width={scene * CELL}
-            height={SIDE_ROWS * CELL}
-            alt="Clawd typing on a laptop while Claude works"
-          />
-        </Box>
+        <Svg
+          source={walkerSvg(walker, viewWidth(columns))}
+          width={columns * COLUMN}
+          height={CLIP_HEIGHT * HALF}
+          alt="Clawd walking along the prompt box"
+        />
       )
     }
     if (e.surface !== 'terminal') return next(e)
     band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
-    const { Raster } = $.ui.resolve(e)
-    const latest = recent.at(-1)
+    const progress = checklist(await read($, tasks))
+    const latest = (await read($, commands)).at(-1)
+    const { Box, Raster, Text } = $.ui.resolve(e)
+    const task = progress && (
+      <Text wrap="truncate">{progress.now ? `${progress.now}  ` : ''}<Text dimColor>{progress.count}</Text></Text>
+    )
     return (
       <Box flexDirection="column">
         {(task || latest) && (
@@ -382,7 +342,7 @@ export const register: Register = on => {
             {task}
           </Box>
         )}
-        <Raster key={KEY} columns={columns} rows={ROWS} cells={frame(tick, columns, minis, hasLeader)} />
+        <Raster key={KEY} columns={columns} rows={ROWS} cells={frame(Math.floor(tick / 2), columns, minis, hasLeader)} />
       </Box>
     )
   })

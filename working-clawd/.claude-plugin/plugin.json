@@ -1,7 +1,7 @@
 {
   "name": "working-clawd",
   "version": "0.1.0",
-  "description": "While Claude works, Clawd walks above the prompt in the terminal and types on a laptop above the prompt box in the desktop app, with a mini Clawd for each running subagent.",
+  "description": "While Claude works, Clawd walks above the prompt: along the prompt box in the desktop app, stopping to look around, wave and jump, and back and forth in the terminal.",
   "author": {
     "name": "cprentice9"
   },

@@ -2,7 +2,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { checklist, describeCommand, frame, status, svg, ticker, workingDots } from './register.tsx'
+import { checklist, describeCommand, frame, startWalker, stepWalker, walkerFrame, walkerSvg } from './register.tsx'
+import type { Walker } from './register.tsx'
 
 const ORANGE = 0xd77757
 const DEFAULT = 0x01000000
@@ -71,17 +72,6 @@ const mount = ($: Engine, surface: 'terminal' | 'desktop' | 'vscode', bodyColumn
     props: { hasSurvey: false, maxRows: 10, bodyColumns } as never,
     viewport: { columns: 120, rows: 40 },
   })
-
-// An Svg in a drawing by its alt text: the query finds by type, key or text,
-// and an Svg carries none that tells two apart, so walk the tree from its root.
-type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
-const svgByAlt = async (ui: { find: (q: { type: string }) => Promise<Node | undefined> }, alt: string) => {
-  const walk = (node: Node): Node[] =>
-    [...(node.type === 'Svg' && node.props?.alt === alt ? [node] : []),
-      ...(node.children ?? []).flatMap(child => (typeof child === 'object' && child ? walk(child as Node) : []))]
-  const root = await ui.find({ type: 'Box' })
-  return root ? walk(root)[0] : undefined
-}
 
 const complete = ($: Engine, turnId: string, agentId?: string) =>
   $.turn.complete({ answer: 'ok', durationMs: 1000, isAborted: false, turnId, agentId, reason: 'answer' })
@@ -187,18 +177,21 @@ test('each tick of the timer repaints the band with the next frame', async ($, o
   const ui = await mount($, 'terminal')
   tick()
   for (let i = 0; i < 50 && blits.length === 0; i++) await Promise.resolve()
-  expect(periods[0]).toBe(150)
-  expect(blits).toEqual([frame(1, 100)])
+  expect(periods[0]).toBe(83)
+  // The terminal walker steps every other frame of the 12 a second.
+  expect(blits).toEqual([frame(0, 100)])
   await ui.unmount()
   await complete($, 't1')
 })
 
-test('the desktop app draws him as an SVG; a narrow terminal and the editor draw nothing', async ($, on) => {
+test('the desktop app draws him walking as an SVG; a narrow terminal and the editor draw nothing', async ($, on) => {
   engine(on)
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
-  const drawn = await svgByAlt(desktop, 'Clawd typing on a laptop while Claude works')
-  expect(drawn?.props).toMatchObject({ source: svg(0, 28, 0, true), width: 56, height: 28 })
+  const drawn = await desktop.find({ type: 'Svg' })
+  // 100 columns of about 8 CSS pixels is 533 half pixels to walk.
+  expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 533), width: 800, height: 45 })
+  expect(await desktop.find({ type: 'Text' })).toBeUndefined()
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
@@ -206,43 +199,6 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
     await ui.unmount()
   }
   await complete($, 't1')
-})
-
-test('the desktop scene: he sits at the right end at his laptop, minis to his left', () => {
-  const cell = (markup: string, x: number, y: number) =>
-    markup.match(new RegExp(`<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="(#[0-9a-f]{6})"/>`))?.[1]
-  const source = svg(0, 40)
-  // Scaled by its height and anchored right, with nothing behind him.
-  expect(source).toContain('width="80" height="28" viewBox="0 0 40 14" preserveAspectRatio="xMaxYMax slice"')
-  expect(source).toContain('<g transform="translate(12 0) scale(1)">')
-  // The top of his head, his eye as a hole, and his laptop's base.
-  expect(cell(source, 11, 0)).toBe('#d77757')
-  expect(cell(source, 19, 3)).toBeUndefined()
-  expect(cell(source, 4, 13)).toBe('#9a9c9f')
-  // His legs stand in two pairs with a gap between, each foot a step back.
-  expect(cell(source, 12, 11)).toBe('#d77757')
-  expect(cell(source, 14, 11)).toBeUndefined()
-  expect(cell(source, 15, 11)).toBe('#d77757')
-  for (const x of [17, 18, 19, 20]) expect(cell(source, x, 11)).toBeUndefined()
-  expect(cell(source, 21, 11)).toBe('#d77757')
-  expect(cell(source, 12, 13)).toBeUndefined()
-  expect(cell(source, 13, 13)).toBe('#d77757')
-  // He blinks every 16th frame.
-  expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
-  // His hands circle half a turn apart: on frame 0 one is up and the other
-  // presses the laptop's base; on frame 1 both swing to the middle.
-  expect(cell(source, 8, 6)).toBe('#d77757')
-  expect(cell(source, 8, 12)).toBe('#d77757')
-  expect(cell(source, 8, 9)).toBeUndefined()
-  expect(cell(svg(1, 40), 7, 9)).toBe('#d77757')
-  expect(cell(svg(1, 40), 8, 12)).toBeUndefined()
-  expect(cell(svg(2, 40), 8, 12)).toBe('#d77757')
-  // Each mini is smaller with its own laptop; one that does not fit is left out.
-  const sprites = (markup: string) => markup.split('<g transform').length - 1
-  expect(sprites(svg(0, 40, 1))).toBe(1)
-  expect(sprites(svg(0, 60, 1))).toBe(2)
-  expect(sprites(svg(0, 60, 3))).toBe(2)
-  expect(sprites(svg(0, 70, 3))).toBe(3)
 })
 
 test('the checklist line counts done tasks and names the one in progress', () => {
@@ -272,12 +228,9 @@ test("the band follows the main loop's task list, not a subagent's", async ($, o
   await call({ tool: 'TaskUpdate', taskId: '1', status: 'in_progress' })
   await call({ tool: 'Bash', command: 'npm test' })
 
-  // Desktop: the task, then the app's status beside him, the command ticker
-  // to the left of both.
-  let ui = await mount($, 'desktop')
-  expect(await ui.find({ type: 'Text', text: 'Drawing the hands' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /0s \u00b7 Working$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^Bash npm test {3}/ })).toBeDefined()
+  // The terminal shows the latest command and the task above the walker.
+  let ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /^Drawing the hands {2}0 of 2$/ })).toBeDefined()
   await ui.unmount()
 
   await call({ tool: 'TaskUpdate', taskId: '1', status: 'completed' })
@@ -289,46 +242,54 @@ test("the band follows the main loop's task list, not a subagent's", async ($, o
   await complete($, 't1')
 })
 
-test('commands read as the tool and its main argument, and the ticker scrolls them', () => {
+test('commands read as the tool and its main argument', () => {
   expect(describeCommand({ tool: 'Bash', command: 'npm test\n--verbose' })).toBe('Bash npm test')
   expect(describeCommand({ tool: 'Edit', file_path: '/src/hooks/register.tsx' })).toBe('Edit register.tsx')
   expect(describeCommand({ tool: 'TaskList' })).toBe('TaskList')
-  expect(ticker([], 0)).toBe('')
-  // One character further along each frame, looping back to the start.
-  expect(ticker(['Bash a', 'Read b'], 0)).toBe('Bash a   Read b   Bash a   Read b   Bash')
-  expect(ticker(['Bash a', 'Read b'], 1)).toBe('ash a   Read b   Bash a   Read b   Bash ')
-  expect(ticker(['Bash a', 'Read b'], 18)).toBe(ticker(['Bash a', 'Read b'], 0))
-  // The band hands it its own width.
-  expect(ticker(['Bash a'], 0, 100)).toHaveLength(100)
 })
 
-test("the app's spinner status shows just left of him: elapsed time and what it is doing", async ($, on) => {
-  expect(status(20, { word: 'Working', message: null, mode: 'thinking' })).toBe('20s \u00b7 Thinking')
-  expect(status(3, { word: 'Creating notes.md', message: null, mode: 'tool-use' })).toBe('3s \u00b7 Creating notes.md')
-  expect(status(0)).toBe('0s \u00b7 Working')
+// Steps a walker `n` frames, starting at frame `t`.
+const walk = (w: Walker, width: number, n: number, t = 0) => {
+  for (let i = 0; i < n; i++) w = stepWalker(w, width, t + i)
+  return w
+}
 
-  const { clock } = engine(on)
-  clock.now = 1_000
-  await $.turn.start({ text: 'hi', turnId: 't1' })
-  const spinner = await $.ui.mount({
-    plugin: 'working-clawd',
-    surface: 'desktop',
-    component: 'Spinner',
-    props: { word: 'Working', message: null, suffix: '\u2026', mode: 'thinking' } as never,
-    viewport: { columns: 120, rows: 40 },
-  })
-  await spinner.unmount()
-  clock.now = 21_400
-  const ui = await mount($, 'desktop')
-  expect(await ui.find({ type: 'Text', text: '20s \u00b7 Thinking' })).toBeDefined()
-  expect((await svgByAlt(ui, 'Working'))?.props.source).toBe(workingDots(0))
-  await ui.unmount()
-  await complete($, 't1')
+test('he walks a half pixel a frame, turns at the right end, and walks back mirrored', () => {
+  // 64 half pixels wide less his 24 leaves 40 to walk; no stop before then.
+  let w: Walker = { ...startWalker(), until: 999 }
+  w = walk(w, 64, 10)
+  expect(w).toMatchObject({ x: 10, dir: 1, clip: 'walking' })
+  w = walk(w, 64, 30)
+  expect(w).toMatchObject({ x: 40, clip: 'turning', at: 0 })
+  w = walk(w, 64, 29)
+  expect(w).toMatchObject({ x: 40, dir: -1, clip: 'walking', at: -1 })
+  w = walk({ ...w, until: 999 }, 64, 5)
+  expect(w).toMatchObject({ x: 35, dir: -1 })
+  // Facing left, his walking frame is the right-facing one mirrored.
+  expect(walkerFrame(w)).toEqual(walkerFrame({ ...w, dir: 1 }).map(row => [...row].reverse().join('')))
 })
 
-test('the working mark is four orange dots in a square, turning 30 degrees a frame', () => {
-  expect(workingDots(0).split('<circle').length - 1).toBe(4)
-  expect(workingDots(0)).toContain('rotate(0 6 6)')
-  expect(workingDots(1)).toContain('rotate(30 6 6)')
-  expect(workingDots(12)).toContain('rotate(0 6 6)')
+test('after a stretch of walking he stops to look, wave, jump or turn, then walks on', () => {
+  let w: Walker = { ...startWalker(), x: 10, until: 0 }
+  expect(stepWalker(w, 200, 0).clip).toBe('looking')
+  expect(stepWalker(w, 200, 1).clip).toBe('waving')
+  expect(stepWalker(w, 200, 2).clip).toBe('jumping')
+  expect(stepWalker(w, 200, 3).clip).toBe('turning')
+  // Waving runs its 17 frames in place, then he walks on the same way.
+  w = stepWalker(w, 200, 1)
+  w = walk(w, 200, 17)
+  expect(w).toMatchObject({ x: 11, dir: 1, clip: 'walking', at: -1 })
+  expect(w.until).toBeGreaterThanOrEqual(30)
+})
+
+test('the SVG draws his frame where he stands, his eyes left as holes', () => {
+  const w: Walker = { ...startWalker(), x: 7, clip: 'looking', at: 0 }
+  const source = walkerSvg(w, 100)
+  expect(source).toContain('width="150" height="45" viewBox="0 0 100 30"')
+  // The front frame: his body's top row runs 16 half pixels from x 4, here 11.
+  expect(source).toContain('<rect x="11" y="14" width="16" height="1" fill="#d97757"/>')
+  // Its eye row: body, two eye cells left empty, body again.
+  expect(source).toContain('<rect x="11" y="16" width="2" height="1" fill="#d97757"/>')
+  expect(source).toContain('<rect x="15" y="16" width="8" height="1" fill="#d97757"/>')
+  expect(source).not.toContain('fill="#141413"')
 })
