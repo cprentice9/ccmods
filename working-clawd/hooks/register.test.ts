@@ -189,8 +189,8 @@ test('the desktop app draws him walking as an SVG; a narrow terminal and the edi
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
   const drawn = await desktop.find({ type: 'Svg' })
-  // 100 columns of about 8 CSS pixels is 533 half pixels to walk.
-  expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 533), width: 800, height: 45 })
+  // 100 columns of about 8 CSS pixels is 400 half pixels of 2 to walk.
+  expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 400), width: 800, height: 60 })
   expect(await desktop.find({ type: 'Text' })).toBeUndefined()
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
@@ -285,7 +285,7 @@ test('after a stretch of walking he stops to look, wave, jump or turn, then walk
 test('the SVG draws his frame where he stands, his eyes left as holes', () => {
   const w: Walker = { ...startWalker(), x: 7, clip: 'looking', at: 0 }
   const source = walkerSvg(w, 100)
-  expect(source).toContain('width="150" height="45" viewBox="0 0 100 30"')
+  expect(source).toContain('width="200" height="60" viewBox="0 0 100 30"')
   // The front frame: his body's top row runs 16 half pixels from x 4, here 11.
   expect(source).toContain('<rect x="11" y="14" width="16" height="1" fill="#d97757"/>')
   // Its eye row: body, two eye cells left empty, body again.

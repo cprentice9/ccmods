@@ -22,7 +22,7 @@ const ROWS = HEIGHT / 2
 const TICK_MS = 83
 // The desktop band, in CSS pixels: a half pixel of Clawd, and a guess at one
 // of the band's columns, to know how far he can walk.
-const HALF = 1.5
+const HALF = 2
 const COLUMN = 8
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
