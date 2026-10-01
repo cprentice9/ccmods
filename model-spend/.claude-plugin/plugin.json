@@ -1,0 +1,6 @@
+{
+  "name": "model-spend",
+  "version": "0.1.0",
+  "description": "Pins a status line with this session's tokens per model family and its total cost.",
+  "types": "./types/index.d.ts"
+}
