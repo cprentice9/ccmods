@@ -21,6 +21,8 @@ const tally = async ($: EngineInterface, dashes: number) => {
 
 const DASH = String.fromCharCode(0x2014)
 const countDashes = (s: unknown) => (typeof s === 'string' ? s.split(DASH).length - 1 : 0)
+const SPACED_DASH = new RegExp(`[ \\t]*${DASH}[ \\t]*`, 'g')
+const TRAILING_DASH = new RegExp(`[ \\t${DASH}]+$`)
 
 const DASH_DENY =
   'This adds an em dash. Rewrite it with periods or commas. ' +
@@ -148,7 +150,30 @@ export const register: Register = on => {
     return reasons.length > 0 ? { deny: reasons.join(' ') } : next(e)
   })
 
+  // Each em dash in a reply becomes a comma as the reply streams, so none is
+  // drawn or recorded. A piece's trailing spaces and dashes wait for the next
+  // piece of the same block, since the rest of the dash may arrive there.
+  on('turn.step', async function* ($, e, next) {
+    let held = ''
+    let heldIndex = -1
+    let dashes = 0
+    for await (const c of next(e)) {
+      if (c.kind !== 'text') {
+        yield c
+        continue
+      }
+      const joined = (c.index === heldIndex ? held : '') + c.text
+      held = joined.match(TRAILING_DASH)?.[0] ?? ''
+      heldIndex = c.index
+      const text = joined.slice(0, joined.length - held.length)
+      dashes += countDashes(text)
+      yield { ...c, text: text.replace(SPACED_DASH, ', ') }
+    }
+    if (dashes > 0) await tally($, dashes)
+  })
+
   // Stop is the one event that can send a finished reply back to the model.
+  // The stream above leaves no dash for it to find; it stays as a backstop.
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
     // One rewrite per reply, so a stubborn dash cannot loop forever.

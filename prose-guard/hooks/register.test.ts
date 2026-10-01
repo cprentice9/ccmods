@@ -14,6 +14,21 @@ function engine(on: any, fileText: string | null = null) {
 
 const call = ($: any, input: Record<string, unknown>) => $.tool.call(input)
 
+// A model beneath the plugin streams `pieces` as one text block; returns the
+// text the plugin passes on.
+async function streamReply($: any, on: any, pieces: string[]) {
+  on('turn.step', async function* (_$: any, e: any) {
+    for (const text of pieces) yield { kind: 'text', index: 0, text }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+  let text = ''
+  for (let item = await stream.next(); !item.done; item = await stream.next()) {
+    if (item.value.kind === 'text') text += item.value.text
+  }
+  return text
+}
+
 describe('em dashes in tool calls', () => {
   test('Write denies a new dash and passes when the count does not rise', async ($, on) => {
     engine(on, `a ${DASH} b`)
@@ -87,6 +102,24 @@ describe('em dashes in the reply', () => {
       { role: 'assistant', text: 'done', toolUses: [] },
     ])
     expect((await $.classic.Stop({ stop_hook_active: false, last_assistant_message: 'done' })).block).toBeUndefined()
+  })
+})
+
+describe('em dashes as the reply streams', () => {
+  test('a spaced dash becomes a comma', async ($, on) => {
+    expect(await streamReply($, on, [`a ${DASH} b`])).toBe('a, b')
+  })
+
+  test('a dash with no spaces becomes a comma', async ($, on) => {
+    expect(await streamReply($, on, [`a${DASH}b`])).toBe('a, b')
+  })
+
+  test('a dash split across pieces becomes one comma', async ($, on) => {
+    expect(await streamReply($, on, ['a ', DASH, ' b'])).toBe('a, b')
+  })
+
+  test('text without a dash streams unchanged', async ($, on) => {
+    expect(await streamReply($, on, ['one ', 'two, ', 'three'])).toBe('one two, three')
   })
 })
 
@@ -178,6 +211,12 @@ describe('the blocked counter', () => {
     await $.classic.Stop({ stop_hook_active: false, last_assistant_message: `a ${DASH} b` })
     expect(store.get('emDashesBlocked')).toBe(43)
     expect(lines.at(-1)).toBe('43 em dashes blocked')
+  })
+
+  test('counts dashes replaced in a streamed reply', async ($, on) => {
+    const { store } = counter(on, 2)
+    await streamReply($, on, [`a ${DASH} b `, `${DASH} c`])
+    expect(store.get('emDashesBlocked')).toBe(4)
   })
 
   test('one dash reads in the singular', async ($, on) => {
