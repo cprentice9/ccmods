@@ -4,5 +4,6 @@
   "description": "Blocks em dashes in edits, shell commands and replies, and British spellings in prose files, commit messages and pull requests.",
   "author": {
     "name": "cprentice9"
-  }
+  },
+  "types": "./types/index.d.ts"
 }

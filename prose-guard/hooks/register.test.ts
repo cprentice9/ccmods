@@ -151,3 +151,54 @@ describe('British spelling', () => {
     expect((await call($, { tool: 'Bash', command: `git commit -m "${content}"` })).deny).toBeUndefined()
   })
 })
+
+describe('the blocked counter', () => {
+  // A store that starts at `total`, and the status lines the plugin pins.
+  const counter = (on: any, total: number) => {
+    const store = new Map<string, unknown>([['emDashesBlocked', total]])
+    const lines: (string | undefined)[] = []
+    on('store.get', (_$: any, e: { key: string }) => ({ value: store.get(e.key) }))
+    on('store.set', (_$: any, e: { key: string; value: unknown }) => {
+      store.set(e.key, e.value)
+      return { value: undefined }
+    })
+    on('ui.status', (_$: any, e: { text?: string }) => {
+      lines.push(e.text)
+      return { value: undefined }
+    })
+    return { store, lines }
+  }
+
+  test('counts dashes from refused calls and blocked replies', async ($, on) => {
+    engine(on)
+    on('classic.Stop', () => ({}))
+    on('session.messages', () => ({ value: [] }))
+    const { store, lines } = counter(on, 40)
+    await call($, { tool: 'Edit', file_path: 'x.ts', old_string: 'a', new_string: `${DASH} ${DASH}` })
+    await $.classic.Stop({ stop_hook_active: false, last_assistant_message: `a ${DASH} b` })
+    expect(store.get('emDashesBlocked')).toBe(43)
+    expect(lines.at(-1)).toBe('3 em dashes blocked this session, 43 in all')
+  })
+
+  test('one dash in a session reads in the singular', async ($, on) => {
+    engine(on)
+    const { lines } = counter(on, 9)
+    await call($, { tool: 'Bash', command: `echo ${DASH}` })
+    expect(lines.at(-1)).toBe('1 em dash blocked this session, 10 in all')
+  })
+
+  test('a call that passes counts nothing', async ($, on) => {
+    engine(on)
+    const { store, lines } = counter(on, 5)
+    await call($, { tool: 'Edit', file_path: 'x.ts', old_string: DASH, new_string: DASH })
+    expect(store.get('emDashesBlocked')).toBe(5)
+    expect(lines).toEqual([])
+  })
+
+  test('shows the all-time count when a session starts', async ($, on) => {
+    on('session.start', (_$: any, e: { cwd: string }) => ({ cwd: e.cwd }))
+    const { lines } = counter(on, 7)
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    expect(lines).toEqual(['0 em dashes blocked this session, 7 in all'])
+  })
+})

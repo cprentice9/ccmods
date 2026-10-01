@@ -1,4 +1,26 @@
-import type { Register } from 'claude-code'
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
+
+// Em dashes blocked: this session's count in state, the all-time count in the store.
+const blocked = atom({ plugin: 'prose-guard', key: 'blocked' } as const, 0)
+const ALL_TIME = 'emDashesBlocked'
+
+const plural = (n: number) => (n === 1 ? 'em dash' : 'em dashes')
+
+const drawCount = async ($: EngineInterface) => {
+  const total = Number((await $.store.get(ALL_TIME)) ?? 0)
+  const session = (await read($, blocked)) ?? 0
+  if (total > 0) $.ui.status(`${session} ${plural(session)} blocked this session, ${total} in all`)
+}
+
+// A counter that fails must never let a dash through, so its errors stop here.
+const tally = async ($: EngineInterface, dashes: number) => {
+  try {
+    await update($, blocked, n => (n ?? 0) + dashes)
+    await $.store.set(ALL_TIME, Number((await $.store.get(ALL_TIME)) ?? 0) + dashes)
+    await drawCount($)
+  } catch {}
+}
 
 const DASH = String.fromCharCode(0x2014)
 const countDashes = (s: unknown) => (typeof s === 'string' ? s.split(DASH).length - 1 : 0)
@@ -81,6 +103,12 @@ const COMMIT_OR_PR = /\bgit\s+(?:-[Cc]\s+\S+\s+)*commit\b|\bgh\s+pr\s+(?:create|
 const PR_TOOLS = ['mcp__github__create_pull_request', 'mcp__github__update_pull_request']
 
 export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    const r = await next(e)
+    await drawCount($).catch(() => {})
+    return r
+  })
+
   on('tool.call', async ($, e, next) => {
     // MultiEdit and the GitHub tools may not be in this build's typed tool list.
     const t = e as unknown as Record<string, any>
@@ -119,6 +147,7 @@ export const register: Register = on => {
     const reasons = []
     if (dashes > 0) reasons.push(DASH_DENY)
     if (british.length > 0) reasons.push(britishDeny(british))
+    if (dashes > 0) await tally($, dashes)
     return reasons.length > 0 ? { deny: reasons.join(' ') } : next(e)
   })
 
@@ -127,7 +156,10 @@ export const register: Register = on => {
     const result = await next(e)
     // One rewrite per reply, so a stubborn dash cannot loop forever.
     if (e.stop_hook_active || result.block !== undefined) return result
-    return countDashes(await turnText($, e.last_assistant_message)) > 0 ? { ...result, block: REPLY_BLOCK } : result
+    const dashes = countDashes(await turnText($, e.last_assistant_message))
+    if (dashes === 0) return result
+    await tally($, dashes)
+    return { ...result, block: REPLY_BLOCK }
   })
 }
 
