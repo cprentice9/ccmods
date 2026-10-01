@@ -50,7 +50,7 @@ test('a spawn adds a row with the resolved model, and effort and status fill in'
   for (const surface of SURFACES) {
     const ui = await mount($, surface)
     expect(await ui.find({ type: 'Text', text: /running helper Opus 5\.5 effort \?/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'helper task' })).toBeDefined()
+    expect(await ui.find({ type: 'Button', text: 'helper task' })).toBeDefined()
     await ui.unmount()
   }
 
@@ -70,7 +70,7 @@ test('a spawn adds a row with the resolved model, and effort and status fill in'
     expect(await ui.find({ type: 'Text', text: /^done helper/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '1m 15s' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^failed coder/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '0 running, 2 total' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^0 running, 2 total/ })).toBeDefined()
     await ui.unmount()
   }
   expect(opened).toEqual(['subagents'])
@@ -107,4 +107,40 @@ test('model ids read as short names', () => {
   expect(shortModel('claude-fable-5-1')).toBe('Fable 5.1')
   expect(shortModel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
   expect(shortModel('us.anthropic.claude-opus-4-1-20250805-v1:0')).toBe('Opus 4.1')
+})
+
+test('selecting a subagent shows its tool calls and words, and Back returns to the list', async ($, on) => {
+  engine(on)
+  on('tool.call', () => ({ result: 'ok', text: 'ok' }))
+  on('session.messages', (_$, e) => ({
+    value:
+      (e as { agentId?: string }).agentId === 'a1'
+        ? [
+            { role: 'user', text: 'Do the work.', toolUses: [] },
+            {
+              role: 'assistant',
+              text: 'Looking at the tests first.',
+              toolUses: [
+                { tool_use_id: 'u1', tool: 'Bash', input: { command: 'npm test\n--verbose' } },
+                { tool_use_id: 'u2', tool: 'Read', input: { file_path: '/src/app.ts' }, isError: true },
+              ],
+            },
+          ]
+        : [],
+  }))
+  await spawn($, 'helper')
+  await $.tool.call({ tool: 'Bash', command: 'npm test', agentId: 'a1' } as never)
+
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    const open = await ui.find({ type: 'Button', text: 'helper task' })
+    await ui.press({ key: open!.key! })
+    expect(await ui.find({ type: 'Text', text: 'Looking at the tests first.' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Bash npm test' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Read /src/app.ts' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '1 tool call' })).toBeDefined()
+    await ui.press({ key: 'back' })
+    expect(await ui.find({ type: 'Text', text: /^1 running, 1 total/ })).toBeDefined()
+    await ui.unmount()
+  }
 })

@@ -12,11 +12,15 @@ export type SubagentPaneFacts = {
   effort?: string
   status?: 'done' | 'failed'
   durationMs?: number
+  /** Tool calls the subagent has finished; each one redraws its detail view. */
+  tools?: number
 }
 
 export type SubagentPaneState = {
   rows: SubagentPaneRow[]
   facts: Record<string, SubagentPaneFacts>
+  /** The row whose detail view the pane shows; absent, the list. */
+  selected?: string
 }
 
 declare module 'claude-code' {

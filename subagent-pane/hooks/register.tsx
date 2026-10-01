@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { Register, ToolUseSummary } from 'claude-code'
 
 import type { SubagentPaneFacts, SubagentPaneRow, SubagentPaneState } from '../types'
 
@@ -24,6 +24,13 @@ export const shortModel = (id: string) => {
 const elapsed = (ms: number) => {
   const s = Math.round(ms / 1000)
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+// "Bash npm test", "Read /src/app.ts": the tool and the first line of what it was given.
+const describeUse = (use: ToolUseSummary) => {
+  const i = use.input
+  const what = [i.command, i.file_path, i.pattern, i.url, i.query, i.description].find(v => typeof v === 'string')
+  return what ? `${use.tool} ${String(what).split('\n')[0]}` : use.tool
 }
 
 const setFacts = (agentId: string, change: (f: SubagentPaneFacts) => SubagentPaneFacts) =>
@@ -100,9 +107,70 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Counting a subagent's finished tool calls redraws its detail view.
+  on('tool.call', async ($, e, next) => {
+    const ran = await next(e)
+    const { agentId } = e
+    if (agentId && (await read($, agents)).rows.some(row => row.agentId === agentId)) {
+      await update($, agents, setFacts(agentId, f => ({ ...f, tools: (f.tools ?? 0) + 1 })))
+    }
+    return ran
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const s = await read($, agents)
+    const select = (id: string | undefined) => update($, agents, (t = EMPTY) => ({ ...t, selected: id }))
+
+    // Status, type, model and effort on one line, elapsed time on the right.
+    const header = (row: SubagentPaneRow) => {
+      const facts = (row.agentId && s.facts[row.agentId]) || {}
+      const status = facts.status ?? 'running'
+      const color = status === 'done' ? 'green' : status === 'failed' ? 'red' : 'yellow'
+      return (
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text wrap="truncate">
+            <Text color={color}>{status}</Text> <Text bold>{row.type}</Text>{' '}
+            {row.model ? shortModel(row.model) : '...'} <Text dimColor={!facts.effort}>{facts.effort ?? 'effort ?'}</Text>
+          </Text>
+          {facts.durationMs !== undefined && <Text dimColor>{elapsed(facts.durationMs)}</Text>}
+        </Box>
+      )
+    }
+
+    const chosen = s.rows.find(row => row.id === s.selected)
+    if (chosen) {
+      // The subagent's tool calls and its latest words, newest last.
+      const lines: { key: string; text: string; isError?: boolean; isWords?: boolean }[] = []
+      const messages = chosen.agentId ? await $.session.messages({ agentId: chosen.agentId }) : []
+      messages.forEach((m, i) => {
+        if (m.role !== 'assistant') return
+        if (m.text.trim()) lines.push({ key: `w-${i}`, text: m.text.trim().split('\n')[0]!, isWords: true })
+        for (const use of m.toolUses) lines.push({ key: `u-${use.tool_use_id}`, text: describeUse(use), isError: use.isError })
+      })
+      const tools = (chosen.agentId && s.facts[chosen.agentId]?.tools) || 0
+      const room = Math.max(1, (e.viewport?.rows ?? 24) - 8)
+
+      return (
+        <Box flexDirection="column" width={e.props.bodyColumns}>
+          <Button key="back" plain dimColor onPress={() => select(undefined)}>Back to all subagents</Button>
+          <Box flexDirection="column" marginTop={1}>
+            {header(chosen)}
+            <Text wrap="truncate">{chosen.description}</Text>
+            <Text dimColor>{tools} {tools === 1 ? 'tool call' : 'tool calls'}</Text>
+          </Box>
+          <Box flexDirection="column" marginTop={1}>
+            {lines.length === 0 && <Text dimColor>No activity yet.</Text>}
+            {lines.slice(-room).map(line => (
+              <Text key={line.key} wrap="truncate" color={line.isError ? 'red' : undefined} dimColor={line.isWords}>
+                {line.text}
+              </Text>
+            ))}
+          </Box>
+        </Box>
+      )
+    }
+
     const running = s.rows.filter(row => isRunning(s, row)).length
     const room = Math.max(1, Math.floor(((e.viewport?.rows ?? 24) - 4) / 2))
 
@@ -111,25 +179,14 @@ export const register: Register = on => {
         {s.rows.length === 0 ? (
           <Text dimColor>No subagents started in this session yet.</Text>
         ) : (
-          <Text dimColor>{running} running, {s.rows.length} total</Text>
+          <Text dimColor>{running} running, {s.rows.length} total. Select one to see its activity.</Text>
         )}
-        {s.rows.slice(-room).map(row => {
-          const facts = (row.agentId && s.facts[row.agentId]) || {}
-          const status = facts.status ?? 'running'
-          const color = status === 'done' ? 'green' : status === 'failed' ? 'red' : 'yellow'
-          return (
-            <Box key={`row-${row.id}`} flexDirection="column" marginTop={1}>
-              <Box flexDirection="row" justifyContent="space-between">
-                <Text wrap="truncate">
-                  <Text color={color}>{status}</Text> <Text bold>{row.type}</Text>{' '}
-                  {row.model ? shortModel(row.model) : '...'} <Text dimColor={!facts.effort}>{facts.effort ?? 'effort ?'}</Text>
-                </Text>
-                {facts.durationMs !== undefined && <Text dimColor>{elapsed(facts.durationMs)}</Text>}
-              </Box>
-              <Text dimColor wrap="truncate">{row.description}</Text>
-            </Box>
-          )
-        })}
+        {s.rows.slice(-room).map(row => (
+          <Box key={`row-${row.id}`} flexDirection="column" marginTop={1}>
+            {header(row)}
+            <Button key={`open-${row.id}`} plain dimColor onPress={() => select(row.id)}>{row.description}</Button>
+          </Box>
+        ))}
       </Box>
     )
   })
