@@ -4,43 +4,79 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { WorkingTurn } from '../types'
 
 const KEY = 'clawd'
-const SPRITE = 18
+const BIG = 18
+const MINI = 8
+// Frames each mini trails behind: even, so the minis hop in step with him.
+const FOLLOW = 16
+const SPACING = 10
+const MAX_MINIS = 8
 const MIN_COLUMNS = 24
 const MAX_COLUMNS = 512
 const HEIGHT = 6
 const ROWS = HEIGHT / 2
 const TICK_MS = 150
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
+const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 
 const CLEAR = -1
 const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
 
-// One frame as Raster cells, `columns` wide. Clawd, drawn as the CLI logo
-// draws him, walks one column per frame and turns around at each end. Every
-// other frame he hops, feet splayed; his eyes look the way he is walking, and
-// he blinks every 16th frame.
-export const frame = (t: number, columns: number) => {
-  const px = new Int32Array(columns * HEIGHT).fill(CLEAR)
-  const range = columns - SPRITE
-  const step = t % (2 * range)
-  const left = step <= range ? step : 2 * range - step
-  const facing = step < range ? 1 : -1
-  const isHop = t % 2 === 1
-  const top = isHop ? 0 : 1
-  const set = (x: number, y: number, color = ORANGE) => (px[y * columns + left + x] = color)
+const mod = (n: number, m: number) => ((n % m) + m) % m
 
-  for (let row = 0; row < 4; row++) {
-    for (let x = 3; x < 15; x++) set(x, top + row)
+// Where the walk puts a sprite's center at frame t: one column per frame,
+// turning around at each end, and which way it faces.
+const path = (t: number, columns: number) => {
+  const range = columns - BIG
+  const step = mod(t, 2 * range)
+  const center = BIG / 2 + (step <= range ? step : 2 * range - step)
+  return { center, facing: step < range ? 1 : -1 }
+}
+
+// One frame as Raster cells, `columns` wide. Clawd, drawn as the CLI logo
+// draws him, walks the path; every other frame he hops, feet splayed, his eyes
+// look the way he is walking, and he blinks every 16th frame. Each mini, one
+// per running subagent, walks the same path a set number of frames behind,
+// so they follow him around each turn and hop in step.
+export const frame = (t: number, columns: number, minis = 0, hasLeader = true) => {
+  const px = new Int32Array(columns * HEIGHT).fill(CLEAR)
+  const sprite = (at: number, width: number) => {
+    const { center, facing } = path(at, columns)
+    const left = center - width / 2
+    const isHop = mod(at, 2) === 1
+    const set = (x: number, y: number, color = ORANGE) => (px[y * columns + left + x] = color)
+    return { facing, isHop, set }
   }
-  for (const x of [1, 2, 15, 16]) set(x, top + 2)
-  if (t % 16 !== 15) {
-    set(5 + facing, top + 1, CLEAR)
-    set(12 + facing, top + 1, CLEAR)
+
+  for (let i = Math.min(minis, MAX_MINIS) - 1; i >= 0; i--) {
+    const { isHop, set } = sprite(t - FOLLOW - SPACING * i, MINI)
+    const top = isHop ? 1 : 2
+    for (let row = 0; row < 3; row++) {
+      for (let x = 1; x < 7; x++) set(x, top + row)
+    }
+    set(0, top + 2)
+    set(7, top + 2)
+    set(2, top + 1, CLEAR)
+    set(5, top + 1, CLEAR)
+    for (const x of [1, 6]) set(x, isHop ? 4 : 5)
+    if (isHop) for (const x of [0, 7]) set(x, 5)
   }
-  // Legs start at the edges of his body; a hop splays the feet.
-  for (const x of [3, 5, 12, 14]) set(x, isHop ? 4 : 5)
-  if (isHop) for (const x of [2, 6, 11, 15]) set(x, 5)
+
+  if (hasLeader) {
+    const { facing, isHop, set } = sprite(t, BIG)
+    const top = isHop ? 0 : 1
+    for (let row = 0; row < 4; row++) {
+      for (let x = 3; x < 15; x++) set(x, top + row)
+    }
+    for (const x of [1, 2, 15, 16]) set(x, top + 2)
+    if (mod(t, 16) !== 15) {
+      set(5 + facing, top + 1, CLEAR)
+      set(12 + facing, top + 1, CLEAR)
+    }
+    // Legs start at the edges of his body; a hop splays the feet.
+    for (const x of [3, 5, 12, 14]) set(x, isHop ? 4 : 5)
+    if (isHop) for (const x of [2, 6, 11, 15]) set(x, 5)
+  }
 
   // Two pixels per cell: the upper half block takes the top pixel as its
   // color and the bottom one as its background.
@@ -58,17 +94,18 @@ export const frame = (t: number, columns: number) => {
   return new Uint8Array(words.buffer).toBase64()
 }
 
+// What the band last drew, for the timer's repaints between draws.
 let timer: Timer | undefined
 let tick = 0
-let bandId: string | undefined
-let bandColumns = 0
+let band: { id: string; columns: number; minis: number; hasLeader: boolean } | undefined
 
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
     tick += 1
     // A frame that cannot be painted is skipped; the next one tries again.
-    if (bandId) {
-      $.ui.blit({ requestId: bandId, key: KEY, cells: frame(tick, bandColumns) }).catch(() => {})
+    if (band) {
+      const cells = frame(tick, band.columns, band.minis, band.hasLeader)
+      $.ui.blit({ requestId: band.id, key: KEY, cells }).catch(() => {})
     }
   })
 }
@@ -79,37 +116,60 @@ function stop() {
 }
 
 export const register: Register = on => {
-  // A reload in the middle of a turn picks the animation back up.
+  // A reload while anything works picks the animation back up.
   on('session.start', async ($, e, next) => {
     const r = await next(e)
-    if (await read($, working)) start($)
+    if ((await read($, working)) || (await read($, agents)).length > 0) start($)
     return r
   })
 
   on('turn.start', async ($, e, next) => {
-    tick = 0
+    if (!timer) tick = 0
     await update($, working, () => e.turnId)
     start($)
     return next(e)
   })
 
-  // Only the end of the main turn stops it, not a subagent's.
+  on('agent.spawn', async ($, e, next) => {
+    const ran = await next(e)
+    const { agentId } = ran
+    if (agentId) {
+      await update($, agents, a => (a.includes(agentId) ? a : [...a, agentId]))
+      start($)
+    }
+    return ran
+  })
+
+  // A step from a subagent that already finished means it resumed.
+  on('turn.step', async function* ($, e, next) {
+    const { agentId } = e
+    if (agentId && !(await read($, agents)).includes(agentId)) {
+      await update($, agents, a => (a.includes(agentId) ? a : [...a, agentId]))
+      start($)
+    }
+    return yield* next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
-    if (!e.agentId && e.turnId === (await read($, working))) {
-      stop()
+    const { agentId } = e
+    if (agentId) {
+      await update($, agents, a => a.filter(id => id !== agentId))
+    } else if (e.turnId === (await read($, working))) {
       await update($, working, () => null)
     }
+    if (!(await read($, working)) && (await read($, agents)).length === 0) stop()
     return next(e)
   })
 
   // The band spans the window, so a resize redraws it at the new width.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const isWorking = (await read($, working)) !== null
+    const hasLeader = (await read($, working)) !== null
+    const minis = (await read($, agents)).length
     const columns = Math.min(e.props.bodyColumns, MAX_COLUMNS)
-    if (!isWorking || e.surface !== 'terminal' || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
-    bandId = e.requestId
-    bandColumns = columns
+    const isIdle = !hasLeader && minis === 0
+    if (isIdle || e.surface !== 'terminal' || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
+    band = { id: e.requestId, columns, minis, hasLeader }
     const { Raster } = $.ui.resolve(e)
-    return <Raster key={KEY} columns={columns} rows={ROWS} cells={frame(tick, columns)} />
+    return <Raster key={KEY} columns={columns} rows={ROWS} cells={frame(tick, columns, minis, hasLeader)} />
   })
 }

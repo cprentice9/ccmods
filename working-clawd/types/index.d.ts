@@ -3,6 +3,10 @@ export type WorkingTurn = string | null
 
 declare module 'claude-code' {
   interface PluginState {
-    'working-clawd': { turnId: WorkingTurn }
+    'working-clawd': {
+      turnId: WorkingTurn
+      /** The subagents running now, one mini Clawd each. */
+      agents: string[]
+    }
   }
 }

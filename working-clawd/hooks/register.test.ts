@@ -16,13 +16,18 @@ const cell = (cells: string, x: number, row: number) => {
   const i = (row * COLUMNS + x) * 3
   return [...words(cells).slice(i, i + 3)]
 }
+const cell60 = (cells: string, x: number, row: number) => {
+  const i = (row * 60 + x) * 3
+  return [...words(cells).slice(i, i + 3)]
+}
 
-// The leftmost column with any orange in it: where Clawd's left hand is.
-const leftmost = (cells: string) => {
+// The leftmost column with any orange in it: the left hand of whoever is
+// furthest left.
+const leftmost = (cells: string, columns = COLUMNS) => {
   const w = words(cells)
-  for (let x = 0; x < COLUMNS; x++) {
+  for (let x = 0; x < columns; x++) {
     for (let row = 0; row < 3; row++) {
-      const i = (row * COLUMNS + x) * 3
+      const i = (row * columns + x) * 3
       if (w[i + 1] === ORANGE || w[i + 2] === ORANGE) return x
     }
   }
@@ -37,6 +42,10 @@ const engine = (on: On) => {
   let release = () => {}
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: null, usage: null }
+  })
   // The engine's own band: an empty box.
   on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}))
   on('ui.blit', (_$, e) => {
@@ -101,6 +110,44 @@ test('his eyes look the way he walks, and he blinks every 16th frame', () => {
   // Frames 13 and 15 are hops while walking left: open eye, then a blink.
   expect(cell(frame(13, COLUMNS), 15, 0)).toEqual([0x2580, ORANGE, DEFAULT])
   expect(cell(frame(15, COLUMNS), 13, 0)).toEqual([0x2580, ORANGE, ORANGE])
+})
+
+test('a mini per subagent follows his path a set distance behind', () => {
+  // In 60 columns at frame 30 he walks right with his left hand at 31. The
+  // first mini walks where he was 16 frames ago, the second 10 frames later.
+  expect(leftmost(frame(30, 60), 60)).toBe(31)
+  expect(leftmost(frame(30, 60, 1), 60)).toBe(19)
+  expect(leftmost(frame(30, 60, 2), 60)).toBe(9)
+})
+
+test('the minis hop in step with him, and walk on their own when he is idle', () => {
+  // Frame 31 is a hop: the first mini's head rises to the top row of pixels.
+  expect(cell60(frame(31, 60, 1), 22, 0)).toEqual([0x2584, ORANGE, DEFAULT])
+  expect(cell60(frame(30, 60, 1), 21, 0)).toEqual([0x20, DEFAULT, DEFAULT])
+  // Without him, only the mini is drawn.
+  expect(leftmost(frame(30, 60, 1, false), 60)).toBe(19)
+  expect(cell60(frame(30, 60, 1, false), 35, 1)).toEqual([0x20, DEFAULT, DEFAULT])
+})
+
+test('the band shows a mini while a subagent runs, and again when it resumes', async ($, on) => {
+  engine(on)
+  await $.agent.spawn({ prompt: 'Go.', description: 'task', subagentType: 'helper' })
+  let ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Raster' })).toBeDefined()
+  await ui.unmount()
+
+  await complete($, 't-a1', 'a1')
+  ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Raster' })).toBeUndefined()
+  await ui.unmount()
+
+  for await (const _ of $.turn.step({ turnId: 't-a1', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a1' })) {
+    // Drain the stream so the step completes.
+  }
+  ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Raster' })).toBeDefined()
+  await ui.unmount()
+  await complete($, 't-a1', 'a1')
 })
 
 test('the band shows Clawd only while a main turn runs', async ($, on) => {
