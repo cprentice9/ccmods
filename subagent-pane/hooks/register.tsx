@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register, ToolUseSummary } from 'claude-code'
+import type { Register } from 'claude-code'
 
 import type { SubagentPaneFacts, SubagentPaneRow, SubagentPaneState } from '../types'
 
@@ -26,11 +26,53 @@ const elapsed = (ms: number) => {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-// "Bash npm test", "Read /src/app.ts": the tool and the first line of what it was given.
-const describeUse = (use: ToolUseSummary) => {
-  const i = use.input
-  const what = [i.command, i.file_path, i.pattern, i.url, i.query, i.description].find(v => typeof v === 'string')
-  return what ? `${use.tool} ${String(what).split('\n')[0]}` : use.tool
+// What a tool call was given: its main argument in full, or the whole input.
+const describeInput = (input: unknown) => {
+  const i = (input ?? {}) as Record<string, unknown>
+  const what = [i.command, i.file_path, i.pattern, i.url, i.query, i.prompt, i.message, i.description].find(v => typeof v === 'string')
+  return typeof what === 'string' ? what : JSON.stringify(i).slice(0, 2000)
+}
+
+type Block = { type: string; [field: string]: unknown }
+type Call = { key: string; kind: 'call'; tool: string; what: string; result?: string; isError?: boolean }
+type Entry = { key: string; kind: 'sent' | 'thinking' | 'words'; text: string } | Call
+
+const RESULT_LINES = 6
+
+const blockText = (content: unknown) =>
+  typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map(b => ((b as Block).type === 'text' ? String((b as Block).text) : '')).join('\n')
+      : ''
+
+// The subagent's conversation in order: what it was sent, its thinking and
+// words, and each tool call with its result. System reminders are left out.
+export const activity = (messages: { role: string; content: Block[] }[]) => {
+  const entries: Entry[] = []
+  const calls = new Map<string, Call>()
+  messages.forEach((m, i) =>
+    m.content.forEach((b, j) => {
+      const key = `${i}-${j}`
+      const text = typeof b.text === 'string' ? b.text.trim() : ''
+      if (b.type === 'text' && text && !text.startsWith('<system-reminder>')) {
+        entries.push({ key, kind: m.role === 'user' ? 'sent' : 'words', text })
+      } else if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim()) {
+        entries.push({ key, kind: 'thinking', text: b.thinking.trim() })
+      } else if (b.type === 'tool_use') {
+        const call: Call = { key, kind: 'call', tool: String(b.name), what: describeInput(b.input) }
+        calls.set(String(b.id), call)
+        entries.push(call)
+      } else if (b.type === 'tool_result') {
+        const call = calls.get(String(b.tool_use_id))
+        if (call) {
+          call.result = blockText(b.content).trim()
+          if (b.is_error === true) call.isError = true
+        }
+      }
+    }),
+  )
+  return entries
 }
 
 const setFacts = (agentId: string, change: (f: SubagentPaneFacts) => SubagentPaneFacts) =>
@@ -95,7 +137,12 @@ export const register: Register = on => {
     if (agentId && (await read($, agents)).facts[agentId]?.effort === undefined) {
       await update($, agents, setFacts(agentId, f => ({ ...f, effort: f.effort ?? (effort === undefined ? 'none' : String(effort)) })))
     }
-    return yield* next(e)
+    const ran = yield* next(e)
+    // Each finished response redraws the detail view with its thinking and words.
+    if (agentId && (await read($, agents)).rows.some(row => row.agentId === agentId)) {
+      await update($, agents, setFacts(agentId, f => ({ ...f, steps: (f.steps ?? 0) + 1 })))
+    }
+    return ran
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -118,7 +165,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Markdown } = $.ui.resolve(e)
     const s = await read($, agents)
     const select = (id: string | undefined) => update($, agents, (t = EMPTY) => ({ ...t, selected: id }))
 
@@ -140,16 +187,43 @@ export const register: Register = on => {
 
     const chosen = s.rows.find(row => row.id === s.selected)
     if (chosen) {
-      // The subagent's tool calls and its latest words, newest last.
-      const lines: { key: string; text: string; isError?: boolean; isWords?: boolean }[] = []
-      const messages = chosen.agentId ? await $.session.messages({ agentId: chosen.agentId }) : []
-      messages.forEach((m, i) => {
-        if (m.role !== 'assistant') return
-        if (m.text.trim()) lines.push({ key: `w-${i}`, text: m.text.trim().split('\n')[0]!, isWords: true })
-        for (const use of m.toolUses) lines.push({ key: `u-${use.tool_use_id}`, text: describeUse(use), isError: use.isError })
-      })
+      // Everything the subagent was sent, thought, said and ran, newest last.
+      // The pane body scrolls, so nothing is cut to fit.
+      const conversation = chosen.agentId ? await $.session.messages({ agentId: chosen.agentId, as: 'api' }) : []
+      const entries = Array.isArray(conversation) ? activity(conversation as { role: string; content: Block[] }[]) : []
       const tools = (chosen.agentId && s.facts[chosen.agentId]?.tools) || 0
-      const room = Math.max(1, (e.viewport?.rows ?? 24) - 8)
+
+      const draw = (entry: Entry) => {
+        if (entry.kind === 'sent') {
+          return (
+            <Box key={entry.key} flexDirection="column" marginTop={1} borderStyle="single" borderColor="cyan" paddingX={1}>
+              <Markdown text={entry.text.slice(0, 10_000)} />
+            </Box>
+          )
+        }
+        if (entry.kind !== 'call') {
+          return (
+            <Box key={entry.key} marginTop={1}>
+              <Markdown text={entry.text.slice(0, 10_000)} dimColor={entry.kind === 'thinking'} />
+            </Box>
+          )
+        }
+        const lines = entry.result?.split('\n') ?? []
+        const hidden = lines.length - RESULT_LINES
+        return (
+          <Box key={entry.key} flexDirection="column" marginTop={1}>
+            <Text wrap="wrap"><Text bold>{entry.tool}</Text> {entry.what}</Text>
+            {entry.result !== undefined && (
+              <Box flexDirection="column" paddingLeft={2}>
+                <Text wrap="wrap" color={entry.isError ? 'red' : undefined} dimColor={!entry.isError}>
+                  {entry.result ? lines.slice(0, RESULT_LINES).join('\n') : 'No output.'}
+                </Text>
+                {hidden > 0 && <Text dimColor>{hidden} more {hidden === 1 ? 'line' : 'lines'}</Text>}
+              </Box>
+            )}
+          </Box>
+        )
+      }
 
       return (
         <Box flexDirection="column" width={e.props.bodyColumns}>
@@ -159,14 +233,9 @@ export const register: Register = on => {
             <Text wrap="truncate">{chosen.description}</Text>
             <Text dimColor>{tools} {tools === 1 ? 'tool call' : 'tool calls'}</Text>
           </Box>
-          <Box flexDirection="column" marginTop={1}>
-            {lines.length === 0 && <Text dimColor>No activity yet.</Text>}
-            {lines.slice(-room).map(line => (
-              <Text key={line.key} wrap="truncate" color={line.isError ? 'red' : undefined} dimColor={line.isWords}>
-                {line.text}
-              </Text>
-            ))}
-          </Box>
+          {!Array.isArray(conversation) && <Box marginTop={1}><Text color="red" wrap="wrap">{conversation.deny}</Text></Box>}
+          {Array.isArray(conversation) && entries.length === 0 && <Box marginTop={1}><Text dimColor>No activity yet.</Text></Box>}
+          {entries.map(draw)}
         </Box>
       )
     }

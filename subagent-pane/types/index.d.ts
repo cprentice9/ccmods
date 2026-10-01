@@ -14,6 +14,8 @@ export type SubagentPaneFacts = {
   durationMs?: number
   /** Tool calls the subagent has finished; each one redraws its detail view. */
   tools?: number
+  /** Model responses the subagent has finished; each one redraws its detail view. */
+  steps?: number
 }
 
 export type SubagentPaneState = {

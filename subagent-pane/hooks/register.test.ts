@@ -109,25 +109,39 @@ test('model ids read as short names', () => {
   expect(shortModel('us.anthropic.claude-opus-4-1-20250805-v1:0')).toBe('Opus 4.1')
 })
 
-test('selecting a subagent shows its tool calls and words, and Back returns to the list', async ($, on) => {
+test('selecting a subagent shows everything it was sent, thought, said and ran, and Back returns to the list', async ($, on) => {
   engine(on)
   on('tool.call', () => ({ result: 'ok', text: 'ok' }))
-  on('session.messages', (_$, e) => ({
-    value:
-      (e as { agentId?: string }).agentId === 'a1'
-        ? [
-            { role: 'user', text: 'Do the work.', toolUses: [] },
-            {
-              role: 'assistant',
-              text: 'Looking at the tests first.',
-              toolUses: [
-                { tool_use_id: 'u1', tool: 'Bash', input: { command: 'npm test\n--verbose' } },
-                { tool_use_id: 'u2', tool: 'Read', input: { file_path: '/src/app.ts' }, isError: true },
-              ],
-            },
-          ]
-        : [],
-  }))
+  const asked: unknown[] = []
+  on('session.messages', (_$, e) => {
+    asked.push((e as { as?: string }).as)
+    return {
+      value:
+        (e as { agentId?: string }).agentId === 'a1'
+          ? [
+              { role: 'user', content: [{ type: 'text', text: 'Do the work.\n\nRun every test.' }] },
+              { role: 'user', content: [{ type: 'text', text: '<system-reminder>\nhidden rule\n</system-reminder>' }] },
+              {
+                role: 'assistant',
+                content: [
+                  { type: 'thinking', thinking: 'The tests come first.' },
+                  { type: 'text', text: 'Looking at the tests first.\n\nThen the app.' },
+                  { type: 'tool_use', id: 'u1', name: 'Bash', input: { command: 'npm test\n--verbose' } },
+                  { type: 'tool_use', id: 'u2', name: 'Read', input: { file_path: '/src/app.ts' } },
+                ],
+              },
+              {
+                role: 'user',
+                content: [
+                  { type: 'tool_result', tool_use_id: 'u1', content: '1\n2\n3\n4\n5\n6\n7\n8' },
+                  { type: 'tool_result', tool_use_id: 'u2', content: [{ type: 'text', text: 'File not found' }], is_error: true },
+                ],
+              },
+              { role: 'user', content: [{ type: 'text', text: 'Also run lint.' }] },
+            ]
+          : [],
+    }
+  })
   await spawn($, 'helper')
   await $.tool.call({ tool: 'Bash', command: 'npm test', agentId: 'a1' } as never)
 
@@ -135,12 +149,21 @@ test('selecting a subagent shows its tool calls and words, and Back returns to t
     const ui = await mount($, surface)
     const open = await ui.find({ type: 'Button', text: 'helper task' })
     await ui.press({ key: open!.key! })
-    expect(await ui.find({ type: 'Text', text: 'Looking at the tests first.' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'Bash npm test' })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: 'Do the work.\n\nRun every test.' })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: /hidden rule/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Markdown', text: 'The tests come first.' })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: 'Looking at the tests first.\n\nThen the app.' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Bash npm test\n--verbose' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '1\n2\n3\n4\n5\n6' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '2 more lines' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Read /src/app.ts' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'File not found' })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: 'Also run lint.' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '1 tool call' })).toBeDefined()
     await ui.press({ key: 'back' })
     expect(await ui.find({ type: 'Text', text: /^1 running, 1 total/ })).toBeDefined()
     await ui.unmount()
   }
+  // Only the API form carries thinking.
+  expect(asked).toContain('api')
 })
