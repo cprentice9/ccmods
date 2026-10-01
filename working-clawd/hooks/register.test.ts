@@ -185,7 +185,7 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
   const drawn = await desktop.find({ type: 'Svg' })
-  expect(drawn?.props.source).toBe(svg(0, 100, 0, true))
+  expect(drawn?.props).toMatchObject({ source: svg(0, 400, 0, true), height: 35 })
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
@@ -197,21 +197,21 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
 
 test('the desktop scene: he sits at the right end behind a MacBook, minis to his left', () => {
   const source = svg(0, 30)
-  expect(source).toContain('width="240" height="40" viewBox="0 0 30 5"')
-  // The app's background behind him, so the band's box disappears.
-  expect(source).toContain('<rect width="100%" height="100%" fill="#151515"/>')
-  // His box is the last 17 columns: the top of his head starts at x 16, and
-  // the right arm reaches the band's right edge.
-  expect(source).toContain('<rect x="16" y="0" width="12" height="1" fill="#d77757"/>')
-  expect(source).toContain('<rect x="28" y="2" width="2" height="1" fill="#d77757"/>')
-  // The aluminum lid in front of him, with the apple at its center.
-  expect(source).toContain('<rect x="17.5" y="2.2" width="8" height="2.8" fill="#b9bcc0" rx="0.25"/>')
-  expect(source).toContain('<circle cx="21.5" cy="3.5" r="0.5" fill="#e4e6e8"/>')
-  // His arms bob in turn: the left is up on even frames, the right on odd.
-  expect(source).toContain('<rect x="14" y="1.5" width="2" height="1" fill="#d77757"/>')
-  expect(svg(1, 30)).toContain('<rect x="28" y="1.5" width="2" height="1" fill="#d77757"/>')
-  // He blinks every 16th frame: the eye row is one solid run.
-  expect(svg(15, 30)).toContain('<rect x="16" y="1" width="12" height="1" fill="#d77757"/>')
+  // Scaled by its height and anchored right, so he keeps his size in any window.
+  expect(source).toContain('width="210" height="35" viewBox="0 0 30 5" preserveAspectRatio="xMaxYMax slice"')
+  // No background: the band shows through around him.
+  expect(source).not.toContain('width="100%"')
+  // His body is the last 17 columns less his arms, with two eye holes.
+  expect(source).toContain('<path d="M16,0 h12 v4 h-12 Z M18,1 v1 h1 v-1 Z M25,1 v1 h1 v-1 Z" fill="#d77757" fill-rule="evenodd"/>')
+  // He blinks every 16th frame: no eye holes.
+  expect(svg(15, 30)).toContain('<path d="M16,0 h12 v4 h-12 Z" fill="#d77757"')
+  // The aluminum lid in front of him, with the apple drawn on it.
+  expect(source).toContain('<rect x="17.5" y="2.3" width="8" height="2.7" fill="#b9bcc0" rx="0.25"/>')
+  expect(source).toContain('fill="#e4e6e8"/><circle cx="9.7" cy="5.2" r="1.5" fill="#b9bcc0"/>')
+  // His hands rest on the lid's edge and take turns pressing down.
+  expect(source).toContain('<rect x="18" y="2.05" width="1.6" height="0.7" fill="#b8603f"')
+  expect(source).toContain('<rect x="23.4" y="1.45" width="1.6" height="0.7" fill="#b8603f"')
+  expect(svg(1, 30)).toContain('<rect x="18" y="1.45" width="1.6" height="0.7" fill="#b8603f"')
   // Each mini is half size with its own laptop; one that does not fit is left out.
   const lids = (markup: string) => markup.split('fill="#b9bcc0" rx').length - 1
   expect(lids(svg(0, 30, 1))).toBe(2)

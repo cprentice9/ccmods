@@ -16,21 +16,25 @@ const HEIGHT = 6
 const ROWS = HEIGHT / 2
 const TICK_MS = 150
 // CSS pixels per pixel of Clawd in the desktop app.
-const PIXEL = 8
+const PIXEL = 7
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 
 const CLEAR = -1
 const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
-// The desktop app's own background, painted behind him so the band's box
-// disappears into the window.
-const APP_BACKGROUND = '#151515'
 const ALUMINUM = '#b9bcc0'
 const RIM = '#dfe1e3'
 const APPLE = '#e4e6e8'
 const DECK = '#d3d5d8'
-const GLOW = '#7fb4ca'
+const HAND = '#b8603f'
+// The apple on the lid, in a 10 by 12 box: its body, a bite and a leaf.
+const APPLE_BODY = 'M5,3.2 C6.2,2.4 9.2,2.4 9.4,5.6 C9.6,8.4 7.8,11.6 6.4,11.6 C5.6,11.6 5.4,11.2 5,11.2 '
+  + 'C4.6,11.2 4.4,11.6 3.6,11.6 C2.2,11.6 0.4,8.4 0.6,5.6 C0.8,2.4 3.8,2.4 5,3.2 Z'
+const APPLE_LEAF = 'M5.2,2.6 C5.2,1.2 6.4,0.4 7.4,0.4 C7.4,1.8 6.2,2.6 5.2,2.6 Z'
+// How wide the desktop drawing is in Clawd pixels: wider than any window, so
+// the app scales it by its height and he keeps his size, anchored right.
+const VIEW_COLUMNS = 400
 // The desktop scene in Clawd pixels: his 17-wide box, standing on the band's
 // bottom edge, which is the top of the prompt box.
 const SCENE_WIDTH = 17
@@ -113,37 +117,37 @@ export const frame = (t: number, columns: number, minis = 0, hasLeader = true) =
   return new Uint8Array(words.buffer).toBase64()
 }
 
-// One Clawd at his laptop, as SVG shapes in Clawd pixels: the logo's body,
-// eyes as holes and side arms, sitting behind an open MacBook seen from the
-// back, its aluminum lid marked with an apple. `s` scales him (a mini is
-// half size). His arms bob in turn as he types, the screen's glow flickers on
-// his face, and he blinks every 16th frame.
+// One Clawd at his laptop, as SVG shapes in Clawd pixels: the logo's body
+// with its eyes as holes and its side arms, sitting behind an open MacBook
+// seen from the back, an apple on its aluminum lid. His hands rest on the
+// lid's top edge and take turns pressing down, and he blinks every 16th
+// frame. `s` scales him; a mini is half size.
 const clawdAtLaptop = (left: number, top: number, s: number, t: number) => {
   const r = (x: number, y: number, w: number, h: number, fill: string, extra = '') =>
     `<rect x="${left + x * s}" y="${top + y * s}" width="${w * s}" height="${h * s}" fill="${fill}"${extra}/>`
   const orange = `#${ORANGE.toString(16)}`
-  const isBlink = mod(t, 16) === 15
-  const isLeftUp = mod(t, 2) === 0
-  const parts = [
-    r(3, 0, 12, 1, orange),
-    ...(isBlink ? [r(3, 1, 12, 1, orange)] : [r(3, 1, 2, 1, orange), r(6, 1, 6, 1, orange), r(13, 1, 2, 1, orange)]),
-    r(3, 2, 12, 2, orange),
-    r(1, isLeftUp ? 1.5 : 2, 2, 1, orange),
-    r(15, isLeftUp ? 2 : 1.5, 2, 1, orange),
-    ...[3, 5, 12, 14].map(x => r(x, 4, 1, 1, orange)),
-  ]
-  if (mod(t, 3) !== 2) parts.push(r(3, 0, 12, 2.2, GLOW, ' opacity="0.12"'))
+  const eye = (x: number) => ` M${left + x * s},${top + s} v${s} h${s} v${-s} Z`
+  const eyes = mod(t, 16) === 15 ? '' : eye(5) + eye(12)
+  const body = `<path d="M${left + 3 * s},${top} h${12 * s} v${4 * s} h${-12 * s} Z${eyes}" fill="${orange}" fill-rule="evenodd"/>`
+  const k = 0.1 * s
   const cx = left + 8.5 * s
-  const cy = top + 3.5 * s
-  parts.push(
-    r(4.5, 2.2, 8, 2.8, ALUMINUM, ` rx="${0.25 * s}"`),
-    r(4.5, 2.2, 8, 0.18, RIM, ` rx="${0.09 * s}"`),
-    `<circle cx="${cx}" cy="${cy}" r="${0.5 * s}" fill="${APPLE}"/>`,
-    `<circle cx="${cx + 0.48 * s}" cy="${cy - 0.12 * s}" r="${0.22 * s}" fill="${ALUMINUM}"/>`,
-    `<ellipse cx="${cx + 0.08 * s}" cy="${cy - 0.68 * s}" rx="${0.12 * s}" ry="${0.22 * s}" fill="${APPLE}" transform="rotate(35 ${cx + 0.08 * s} ${cy - 0.68 * s})"/>`,
-    r(4, 4.8, 9, 0.2, DECK, ` rx="${0.1 * s}"`),
-  )
-  return parts.join('')
+  const cy = top + 3.6 * s
+  const apple = `<g shape-rendering="geometricPrecision" transform="translate(${cx - 5 * k} ${cy - 6.2 * k}) scale(${k})">`
+    + `<path d="${APPLE_BODY}" fill="${APPLE}"/><circle cx="9.7" cy="5.2" r="1.5" fill="${ALUMINUM}"/>`
+    + `<path d="${APPLE_LEAF}" fill="${APPLE}"/></g>`
+  const isLeftDown = mod(t, 2) === 0
+  return [
+    r(1, 2, 2.2, 1, orange),
+    r(14.8, 2, 2.2, 1, orange),
+    body,
+    ...[3, 5, 12, 14].map(x => r(x, 4, 1, 1, orange)),
+    r(4.5, 2.3, 8, 2.7, ALUMINUM, ` rx="${0.25 * s}"`),
+    r(4.5, 2.3, 8, 0.18, RIM),
+    apple,
+    r(4, 4.8, 9, 0.2, DECK),
+    r(5, isLeftDown ? 2.05 : 1.45, 1.6, 0.7, HAND, ` rx="${0.3 * s}"`),
+    r(10.4, isLeftDown ? 1.45 : 2.05, 1.6, 0.7, HAND, ` rx="${0.3 * s}"`),
+  ].join('')
 }
 
 // A frame as SVG markup for the desktop app, in Clawd pixels PIXEL CSS pixels
@@ -158,7 +162,8 @@ export const svg = (t: number, columns: number, minis = 0, hasLeader = true) => 
     if (left >= 0) parts.push(clawdAtLaptop(left, SCENE_HEIGHT / 2, 0.5, t))
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * PIXEL}" height="${SCENE_HEIGHT * PIXEL}" `
-    + `viewBox="0 0 ${columns} ${SCENE_HEIGHT}"><rect width="100%" height="100%" fill="${APP_BACKGROUND}"/>${parts.join('')}</svg>`
+    + `viewBox="0 0 ${columns} ${SCENE_HEIGHT}" preserveAspectRatio="xMaxYMax slice" shape-rendering="crispEdges">`
+    + `${parts.join('')}</svg>`
 }
 
 // What the band last drew, for the timer's repaints between draws.
@@ -242,12 +247,9 @@ export const register: Register = on => {
     if (isIdle || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
     if (e.surface === 'desktop') {
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
-      const { Box, Svg } = $.ui.resolve(e)
-      return (
-        <Box backgroundColor={APP_BACKGROUND}>
-          <Svg source={svg(tick, columns, minis, hasLeader)} alt="Clawd typing on a laptop while Claude works" />
-        </Box>
-      )
+      const { Svg } = $.ui.resolve(e)
+      const source = svg(tick, VIEW_COLUMNS, minis, hasLeader)
+      return <Svg source={source} height={SCENE_HEIGHT * PIXEL} alt="Clawd typing on a laptop while Claude works" />
     }
     if (e.surface !== 'terminal') return next(e)
     band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
