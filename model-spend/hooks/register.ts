@@ -1,31 +1,35 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, ModelUsage, Register } from 'claude-code'
 
-import type { ModelSpendFamily, ModelSpendTokens } from '../types'
+import type { ModelSpendFamily, ModelSpendUsd } from '../types'
 
-const tokens = atom({ plugin: 'model-spend', key: 'tokens' } as const, {} as ModelSpendTokens)
+const spend = atom({ plugin: 'model-spend', key: 'spend' } as const, {} as ModelSpendUsd)
 
 const FAMILIES = ['Opus', 'Sonnet', 'Fable', 'Haiku'] as const
 
 const familyOf = (model: string): ModelSpendFamily =>
   FAMILIES.find(name => model.toLowerCase().includes(name.toLowerCase())) ?? 'Other'
 
-// 950 stays 950; 1,234 is 1.2k; 340,000 is 340k; 999,960 is 1M.
-const compact = (n: number): string => {
-  if (n < 1000) {
-    return String(n)
-  }
+// List prices in dollars per million tokens: input, output, cache read. A model
+// it does not know is priced as Opus. Cache writes are priced at the one-hour
+// rate, twice the input price, since Claude Code caches for an hour.
+const PRICES: Record<ModelSpendFamily, [input: number, output: number, cacheRead: number]> = {
+  Opus: [4, 20, 0.2],
+  Sonnet: [2, 10, 0.2],
+  Fable: [10, 50, 0.25],
+  Haiku: [1, 5, 0.1],
+  Other: [4, 20, 0.2],
+}
 
-  for (const [size, unit] of [[1e3, 'k'], [1e6, 'M'], [1e9, 'B']] as const) {
-    const v = n / size
-    const shown = v < 9.95 ? Math.round(v * 10) / 10 : Math.round(v)
+const priceOf = (family: ModelSpendFamily, u: ModelUsage): number => {
+  const [input, output, cacheRead] = PRICES[family]
 
-    if (shown < 1000 || unit === 'B') {
-      return `${shown}${unit}`
-    }
-  }
-
-  return String(n)
+  return (
+    u.input_tokens * input +
+    u.output_tokens * output +
+    u.cache_creation_input_tokens * input * 2 +
+    u.cache_read_input_tokens * cacheRead
+  ) / 1e6
 }
 
 const share = (part: number, all: number, isAlone: boolean): string => {
@@ -39,7 +43,7 @@ const share = (part: number, all: number, isAlone: boolean): string => {
 }
 
 const draw = async ($: EngineInterface) => {
-  const counts = Object.entries(await read($, tokens)).filter(([, n]) => n > 0).sort(([, a], [, b]) => b - a)
+  const counts = Object.entries(await read($, spend)).filter(([, n]) => n > 0).sort(([, a], [, b]) => b - a)
   const all = counts.reduce((sum, [, n]) => sum + n, 0)
 
   if (all === 0) {
@@ -47,7 +51,7 @@ const draw = async ($: EngineInterface) => {
     return
   }
 
-  const parts = counts.map(([name, n]) => `${name} ${compact(n)} ${share(n, all, counts.length === 1)}`)
+  const parts = counts.map(([name, n]) => `${name} ${share(n, all, counts.length === 1)}`)
   const usd = (await $.session.usage()).cost?.usd
 
   if (usd !== undefined) {
@@ -65,10 +69,10 @@ export const register: Register = on => {
     return r
   })
 
-  // /clear starts the cost over, so the token totals start over with it.
+  // /clear starts the cost over, so the shares start over with it.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
-      await update($, tokens, () => ({}))
+      await update($, spend, () => ({}))
       $.ui.status(undefined)
     }
 
@@ -79,10 +83,9 @@ export const register: Register = on => {
     const r = yield* next(e)
 
     if (r.usage !== null) {
-      const u = r.usage
-      const spent = u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens
-      const family = familyOf(u.model)
-      await update($, tokens, t => ({ ...t, [family]: (t[family] ?? 0) + spent }))
+      const family = familyOf(r.usage.model)
+      const usd = priceOf(family, r.usage)
+      await update($, spend, t => ({ ...t, [family]: (t[family] ?? 0) + usd }))
       await draw($)
     }
 

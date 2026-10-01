@@ -49,7 +49,7 @@ const step = async ($: Engine, pending: (TurnUsage | null)[], u: TurnUsage | nul
 }
 
 describe('model-spend', () => {
-  test('maps real model ids to their families', async ($, on) => {
+  test('maps real model ids to their families and prices each one', async ($, on) => {
     const { lines, pending } = world(on)
     await step($, pending, usage({ model: 'claude-opus-5-5', output_tokens: 5000 }))
     await step($, pending, usage({ model: 'claude-sonnet-5-5', output_tokens: 3000 }))
@@ -57,10 +57,10 @@ describe('model-spend', () => {
     await step($, pending, usage({ model: 'claude-haiku-4-5-20251001', output_tokens: 600 }))
     await step($, pending, usage({ model: 'some-other-model', output_tokens: 400 }))
 
-    expect(lines.at(-1)).toBe('Opus 5k 50% · Sonnet 3k 30% · Fable 1k 10% · Haiku 600 6% · Other 400 4%')
+    expect(lines.at(-1)).toBe('Opus 52% · Fable 26% · Sonnet 16% · Other 4% · Haiku 2%')
   })
 
-  test('sums input, output and both cache fields', async ($, on) => {
+  test('prices input, output and both cache fields', async ($, on) => {
     const { lines, pending } = world(on)
     await step($, pending, usage({
       model: 'claude-opus-5-5',
@@ -69,8 +69,10 @@ describe('model-spend', () => {
       cache_creation_input_tokens: 300,
       cache_read_input_tokens: 400,
     }))
+    // $6,880 per million on Opus beside $1,720 on Sonnet.
+    await step($, pending, usage({ model: 'claude-sonnet-5-5', output_tokens: 172 }))
 
-    expect(lines.at(-1)).toBe('Opus 1k 100%')
+    expect(lines.at(-1)).toBe('Opus 80% · Sonnet 20%')
   })
 
   test('counts subagent steps with the main loop', async ($, on) => {
@@ -79,16 +81,16 @@ describe('model-spend', () => {
     await step($, pending, usage({ model: 'claude-sonnet-5-5', output_tokens: 200 }), 'agent-1')
     await step($, pending, usage({ model: 'claude-opus-5-5', output_tokens: 100 }), 'agent-2')
 
-    expect(lines.at(-1)).toBe('Opus 800 80% · Sonnet 200 20%')
+    expect(lines.at(-1)).toBe('Opus 89% · Sonnet 11%')
   })
 
-  test('orders by size, uses compact counts and shows small shares as <1%', async ($, on) => {
+  test('orders by spend and shows small shares as <1%', async ($, on) => {
     const { lines, pending } = world(on)
     await step($, pending, usage({ model: 'claude-fable-5-1', cache_read_input_tokens: 9_960 }))
     await step($, pending, usage({ model: 'claude-opus-5-5', cache_read_input_tokens: 1_234_567 }))
     await step($, pending, usage({ model: 'claude-sonnet-5-5', cache_read_input_tokens: 340_000 }))
 
-    expect(lines.at(-1)).toBe('Opus 1.2M 78% · Sonnet 340k 21% · Fable 10k <1%')
+    expect(lines.at(-1)).toBe('Opus 78% · Sonnet 21% · Fable <1%')
   })
 
   test('shows >99% beside a share under 1%', async ($, on) => {
@@ -96,14 +98,14 @@ describe('model-spend', () => {
     await step($, pending, usage({ model: 'claude-opus-5-5', output_tokens: 999_960 }))
     await step($, pending, usage({ model: 'claude-haiku-4-5', output_tokens: 40 }))
 
-    expect(lines.at(-1)).toBe('Opus 1M >99% · Haiku 40 <1%')
+    expect(lines.at(-1)).toBe('Opus >99% · Haiku <1%')
   })
 
   test('adds the session cost when the host has one', async ($, on) => {
     const { lines, pending } = world(on, 4.123)
     await step($, pending, usage({ model: 'claude-opus-5-5', output_tokens: 1500 }))
 
-    expect(lines.at(-1)).toBe('Opus 1.5k 100% · $4.12')
+    expect(lines.at(-1)).toBe('Opus 100% · $4.12')
   })
 
   // A plugin above model-spend that logs how its turn.step hook settled.
@@ -144,7 +146,7 @@ describe('model-spend', () => {
     lines.length = 0
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
 
-    expect(lines).toEqual(['Sonnet 2k 100% · $0.50'])
+    expect(lines).toEqual(['Sonnet 100% · $0.50'])
   })
 
   test('starts the totals over after /clear', async ($, on) => {
@@ -154,7 +156,7 @@ describe('model-spend', () => {
     await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
     await step($, pending, usage({ model: 'claude-opus-5-5', output_tokens: 1000 }))
 
-    expect(lines.at(-1)).toBe('Opus 1k 100% · $0.50')
+    expect(lines.at(-1)).toBe('Opus 100% · $0.50')
   })
 
   test('clears the line on session start before any tokens', async ($, on) => {
