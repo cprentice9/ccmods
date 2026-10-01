@@ -185,7 +185,7 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
   const drawn = await desktop.find({ type: 'Svg' })
-  expect(drawn?.props).toMatchObject({ source: svg(0, 400, 0, true), height: 35 })
+  expect(drawn?.props).toMatchObject({ source: svg(0, 2000, 0, true), height: 21 })
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
@@ -195,25 +195,28 @@ test('the desktop app draws him as an SVG; a narrow terminal and the editor draw
   await complete($, 't1')
 })
 
-test('the desktop scene: he sits at the right end behind a MacBook, minis to his left', () => {
-  const source = svg(0, 30)
-  // Scaled by its height and anchored right, so he keeps his size in any window.
-  expect(source).toContain('width="210" height="35" viewBox="0 0 30 5" preserveAspectRatio="xMaxYMax slice"')
-  // No background: the band shows through around him.
-  expect(source).not.toContain('width="100%"')
-  // His body is the last 17 columns less his arms, with two eye holes.
-  expect(source).toContain('<path d="M16,0 h12 v4 h-12 Z M18,1 v1 h1 v-1 Z M25,1 v1 h1 v-1 Z" fill="#d77757" fill-rule="evenodd"/>')
-  // He blinks every 16th frame: no eye holes.
-  expect(svg(15, 30)).toContain('<path d="M16,0 h12 v4 h-12 Z" fill="#d77757"')
-  // The aluminum lid in front of him, with the apple drawn on it.
-  expect(source).toContain('<rect x="17.5" y="2.3" width="8" height="2.7" fill="#b9bcc0" rx="0.25"/>')
-  expect(source).toContain('fill="#e4e6e8"/><circle cx="9.7" cy="5.2" r="1.5" fill="#b9bcc0"/>')
-  // His hands rest on the lid's edge and take turns pressing down.
-  expect(source).toContain('<rect x="18" y="2.05" width="1.6" height="0.7" fill="#b8603f"')
-  expect(source).toContain('<rect x="23.4" y="1.45" width="1.6" height="0.7" fill="#b8603f"')
-  expect(svg(1, 30)).toContain('<rect x="18" y="1.45" width="1.6" height="0.7" fill="#b8603f"')
-  // Each mini is half size with its own laptop; one that does not fit is left out.
-  const lids = (markup: string) => markup.split('fill="#b9bcc0" rx').length - 1
-  expect(lids(svg(0, 30, 1))).toBe(2)
-  expect(lids(svg(0, 30, 3))).toBe(2)
+test('the desktop scene: he sits at the right end at his laptop, minis to his left', () => {
+  const cell = (markup: string, x: number, y: number) =>
+    markup.match(new RegExp(`<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="(#[0-9a-f]{6})"/>`))?.[1]
+  const source = svg(0, 40)
+  // Scaled by its height and anchored right, with nothing behind him.
+  expect(source).toContain('width="60" height="21" viewBox="0 0 40 14" preserveAspectRatio="xMaxYMax slice"')
+  expect(source).toContain('<g transform="translate(12 0) scale(1)">')
+  // The top of his head, his eye as a hole, and his laptop's base.
+  expect(cell(source, 11, 0)).toBe('#d77757')
+  expect(cell(source, 19, 3)).toBeUndefined()
+  expect(cell(source, 4, 13)).toBe('#9a9c9f')
+  // He blinks every 16th frame.
+  expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
+  // His hands take turns dipping a cell: on even frames the front one is down.
+  expect(cell(source, 8, 10)).toBe('#d77757')
+  expect(cell(source, 8, 5)).toBeUndefined()
+  expect(cell(svg(1, 40), 8, 5)).toBe('#d77757')
+  expect(cell(svg(1, 40), 10, 11)).toBe('#d77757')
+  // Each mini is smaller with its own laptop; one that does not fit is left out.
+  const sprites = (markup: string) => markup.split('<g transform').length - 1
+  expect(sprites(svg(0, 40, 1))).toBe(1)
+  expect(sprites(svg(0, 60, 1))).toBe(2)
+  expect(sprites(svg(0, 60, 3))).toBe(2)
+  expect(sprites(svg(0, 70, 3))).toBe(3)
 })
