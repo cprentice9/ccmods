@@ -215,14 +215,15 @@ test('the desktop scene: he sits at the right end at his laptop, minis to his le
   expect(cell(source, 26, 13)).toBe('#d77757')
   // He blinks every 16th frame.
   expect(cell(svg(15, 40), 19, 3)).toBe('#d77757')
-  // His hands take turns pressing a cell down onto the laptop's base: on
-  // even frames the front hand is down and the back one up.
-  expect(cell(source, 7, 12)).toBe('#d77757')
-  expect(cell(source, 7, 5)).toBeUndefined()
-  expect(cell(source, 9, 5)).toBe('#d77757')
-  expect(cell(source, 9, 12)).toBeUndefined()
-  expect(cell(svg(1, 40), 9, 12)).toBe('#d77757')
-  expect(cell(svg(1, 40), 7, 5)).toBe('#d77757')
+  // His two thin arms take turns pressing a cell down onto the laptop's
+  // base: on even frames the front arm is down and the back one up.
+  expect(cell(source, 9, 12)).toBe('#d77757')
+  expect(cell(source, 9, 5)).toBeUndefined()
+  expect(cell(source, 10, 5)).toBe('#d77757')
+  expect(cell(source, 10, 12)).toBeUndefined()
+  expect(cell(source, 8, 8)).toBeUndefined()
+  expect(cell(svg(1, 40), 10, 12)).toBe('#d77757')
+  expect(cell(svg(1, 40), 9, 5)).toBe('#d77757')
   // Each mini is smaller with its own laptop; one that does not fit is left out.
   const sprites = (markup: string) => markup.split('<g transform').length - 1
   expect(sprites(svg(0, 40, 1))).toBe(1)
@@ -282,4 +283,6 @@ test('commands read as the tool and its main argument, and the ticker scrolls th
   expect(ticker(['Bash a', 'Read b'], 0)).toBe('Bash a   Read b   Bash a   Read b   Bash')
   expect(ticker(['Bash a', 'Read b'], 1)).toBe('ash a   Read b   Bash a   Read b   Bash ')
   expect(ticker(['Bash a', 'Read b'], 18)).toBe(ticker(['Bash a', 'Read b'], 0))
+  // The band hands it its own width.
+  expect(ticker(['Bash a'], 0, 100)).toHaveLength(100)
 })

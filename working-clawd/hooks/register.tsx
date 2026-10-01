@@ -22,7 +22,7 @@ const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as s
 const tasks = atom({ plugin: 'working-clawd', key: 'tasks' } as const, {} as WorkingTasks)
 const commands = atom({ plugin: 'working-clawd', key: 'commands' } as const, [] as string[])
 const MAX_COMMANDS = 8
-// Characters of the command ticker shown at once.
+// Characters of the command ticker by default; the band gives it its width.
 const TICKER = 40
 
 const CLEAR = -1
@@ -30,9 +30,9 @@ const DEFAULT = 0x01000000
 const ORANGE = 0xd77757
 const LAPTOP = '#9a9c9f'
 // The desktop Clawd, drawn the way the app's own one is: seen from the side,
-// facing left, his head over his face with one eye (E, a hole), his front (F)
-// and back (B) hands out in front of him over a laptop (g) whose lid tilts
-// back and whose base sits on the ground; a pressed hand lands on its keys. His four legs
+// facing left, his head over his face with one eye (E, a hole), and two thin
+// arms, front (F) and back (B), reaching straight down to the keys of a
+// laptop (g) whose lid tilts back and whose base sits on the ground. His four legs
 // bend a little at the knee. 28 cells by 14.
 const SIDE = [
   '...........OOOOOOOOOOOOOOOO.',
@@ -40,13 +40,13 @@ const SIDE = [
   '...........OOOOOOOOOOOOOOOO.',
   '.............OOOOOOEEOOOOOO.',
   '.............OOOOOOEEOOOOOO.',
-  '.......FFBBOOOOOOOOOOOOOOOO.',
-  '.......FFBBOOOOOOOOOOOOOOOO.',
-  '.......FFBBOOOOOOOOOOOOOOOO.',
-  'g......FFBBOOOOOOOOOOOOOOOO.',
-  'gg.....FFBBOOOOOOOOOOOOOOOO.',
-  '.gg....FFBBOOOOOOOOOOOOOOOO.',
-  '..gg...FFBB.OO..OO..OO..OO..',
+  '.........FBOOOOOOOOOOOOOOOO.',
+  '.........FBOOOOOOOOOOOOOOOO.',
+  '.........FBOOOOOOOOOOOOOOOO.',
+  'g........FBOOOOOOOOOOOOOOOO.',
+  'gg.......FBOOOOOOOOOOOOOOOO.',
+  '.gg......FBOOOOOOOOOOOOOOOO.',
+  '..gg.....FB.OO..OO..OO..OO..',
   '...ggg......OOO.OOO.OOO.OOO.',
   '....ggggggg..OO..OO..OO..OO.',
 ]
@@ -183,13 +183,13 @@ export const describeCommand = (call: Record<string, unknown>) => {
   return `${String(call.tool)} ${what}`.trim().slice(0, 60)
 }
 
-// The ticker's window at frame t: the commands in a loop, one character
-// further along each frame.
-export const ticker = (list: string[], t: number) => {
+// The ticker's window at frame t, `width` characters: the commands in a
+// loop, one character further along each frame.
+export const ticker = (list: string[], t: number, width = TICKER) => {
   if (list.length === 0) return ''
   const loop = `${list.join('   ')}   `
   const from = mod(t, loop.length)
-  return loop.repeat(Math.ceil((from + TICKER) / loop.length)).slice(from, from + TICKER)
+  return loop.repeat(Math.ceil((from + width) / loop.length)).slice(from, from + width)
 }
 
 // What the band last drew, for the timer's repaints between draws.
@@ -318,8 +318,8 @@ export const register: Register = on => {
       const scene = sceneColumns(minis)
       return (
         <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" width={columns}>
-          <Box flexShrink={1} marginRight={3}>
-            <Text dimColor wrap="truncate">{ticker(recent, tick)}</Text>
+          <Box flexGrow={1} flexShrink={1} marginRight={3}>
+            <Text dimColor wrap="truncate">{ticker(recent, tick, columns)}</Text>
           </Box>
           <Box flexShrink={1} marginRight={1}>{task}</Box>
           <Svg
