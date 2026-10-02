@@ -206,21 +206,22 @@ const bandRows = (w: Walker) => {
   return Array.from({ length: BAND_ROWS }, (_, y) => rows[y + TOP - lift] ?? '')
 }
 
-// Clawd's rects, from his left edge: each row's runs of one color, his eyes left
-// as holes.
-const walkerRects = (w: Walker) => {
-  const rects: string[] = []
-  bandRows(w).forEach((row, y) => {
+// A pose's shape, from his left edge: a path for each color through that
+// color's runs in each row, his eyes left as holes.
+const posePaths = (rows: string[]) => {
+  const runs: Record<string, string> = {}
+  rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
-      const fill = COLORS[row[x]!]
-      if (!fill) continue
+      const cell = row[x]!
+      if (!COLORS[cell]) continue
       let end = x
-      while (row[end + 1] === row[x]) end++
-      rects.push(`<rect x="${x}" y="${y}" width="${end - x + 1}" height="1" fill="${fill}"/>`)
+      while (row[end + 1] === cell) end++
+      const w = end - x + 1
+      runs[cell] = `${runs[cell] ?? ''}M${x} ${y}h${w}v1h-${w}z`
       x = end
     }
   })
-  return rects.join('')
+  return Object.entries(runs).map(([cell, d]) => `<path fill="${COLORS[cell]}" d="${d}"/>`).join('')
 }
 
 // A number from 0 to 1 that depends only on `n`, so the sky stays the same
@@ -262,32 +263,106 @@ const stars = (width: number) => {
 export const starfield = (width: number) =>
   stars(width).map(d => `<circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${STAR}" opacity="${d.opacity}"/>`).join('')
 
-// The sky as its own SVG, built once. It never changes, so the app decodes it
-// once and each frame resends only the walkers.
+// The sky: a dark fill and its stars, built once.
 let sky: string | undefined
-export const skySvg = () =>
-  (sky ??= `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${BAND_HEIGHT}">`
-    + `<rect width="100%" height="100%" fill="${SKY}"/><g transform="scale(${HALF})">${starfield(SKY_WIDTH)}</g></svg>`)
+const skyMarkup = () => (sky ??= `<rect width="100%" height="100%" fill="${SKY}"/><g transform="scale(${HALF})">${starfield(SKY_WIDTH)}</g>`)
+export const skySvg = () => `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${BAND_HEIGHT}">${skyMarkup()}</svg>`
 
-// One walker at `scale`, `at` of the way along whatever width the app gives
-// the band: a percentage, less that share of his own width, so he spans it
-// end to end without knowing its pixels.
-const placed = (w: Walker, at: number, scale: number) => {
-  const size = HALF * scale
-  return `<svg x="${round(at * 100)}%" overflow="visible">`
-    + `<g transform="translate(${round(-at * CLIP_WIDTH * size)} ${BAND_HEIGHT * (1 - scale)}) scale(${size})">${walkerRects(w)}</g></svg>`
+// The desktop draws the band as one SVG that animates itself: the sky, and
+// each walker's walk worked out ahead from stepWalker a frame a tick. The mod
+// sends it again only when the band changes. A new image every frame grew
+// the app's memory without end.
+
+// The most markup an Svg takes, and about what each frame of a walk costs.
+// The sky, the poses and the rest leave the walks the remainder: Clawd a
+// loop of up to four minutes, the minis the rest between them.
+const MAX_SOURCE = 131072
+const TICK_CHARS = 18
+const POSE_CHARS = 30000
+const LEADER_TICKS = 3000
+export const miniTicks = (minis: number) =>
+  Math.floor(((MAX_SOURCE - skyMarkup().length - POSE_CHARS) / TICK_CHARS - LEADER_TICKS) / Math.max(1, minis))
+
+// Back where he starts: at the left end, facing right, about to walk.
+const isHome = (w: Walker) => w.clip === 'walking' && w.at === -1 && w.x === 0 && w.dir === 1
+
+export type Walk = { intro: Walker[]; loop: Walker[] }
+
+// His walk from `w` at tick `t`, at most `ticks` frames: the frames until he
+// first gets home, then the most laps from home back home. With no lap that
+// fits, the frames he has, so he jumps back to the start of them each time.
+export const planWalk = (w: Walker, width: number, t: number, ticks: number): Walk => {
+  const frames = [w]
+  const homes: number[] = []
+  for (let i = 1; i <= ticks; i++) {
+    w = stepWalker(w, width, t + i)
+    if (isHome(w)) homes.push(i)
+    frames.push(w)
+  }
+  const home = isHome(frames[0]!) ? 0 : homes[0]
+  const cut = homes.at(-1)
+  if (home === undefined || cut === undefined || cut <= home) return { intro: [], loop: frames.slice(0, ticks) }
+  return { intro: frames.slice(0, home), loop: frames.slice(home, cut) }
 }
 
-// The walkers as SVG markup in CSS pixels, as wide as the app makes the band,
-// clear where the sky shows through: the minis a quarter smaller standing on
-// the same line, and Clawd in front. `width` is the walk's length in half
-// pixels, a guess from the columns, so a wrong guess changes only how fast
-// they cross.
-export const walkerSvg = (w: Walker | null, width: number, minis: Walker[] = []) => {
-  const along = (m: Walker, scale: number) => m.x / Math.max(1, Math.floor(width / scale) - CLIP_WIDTH)
-  const small = minis.map(m => placed(m, along(m, MINI_SCALE), MINI_SCALE))
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${BAND_HEIGHT}">`
-    + `<g shape-rendering="crispEdges">${small.join('')}${w ? placed(w, along(w, 1), 1) : ''}</g></svg>`
+// The poses the band's walkers take, each once, side by side in a strip that
+// a window his size shows one of at a time. Facing left, a pose is drawn
+// mirrored.
+const poseStrip = () => {
+  const poses = new Map<string, number>()
+  const slots = new Map<string, number>()
+  const defs: string[] = []
+  const strip: string[] = []
+  const slot = (w: Walker) => {
+    const rows = bandRows({ ...w, dir: 1 })
+    const key = rows.join('/')
+    if (!poses.has(key)) {
+      defs.push(`<g id="p${poses.size}">${posePaths(rows)}</g>`)
+      poses.set(key, poses.size)
+    }
+    const pose = poses.get(key)!
+    const name = `${pose} ${w.dir}`
+    if (!slots.has(name)) {
+      const left = slots.size * CLIP_WIDTH
+      strip.push(w.dir > 0
+        ? `<use href="#p${pose}" x="${left}"/>`
+        : `<use href="#p${pose}" transform="translate(${left + CLIP_WIDTH} 0) scale(-1 1)"/>`)
+      slots.set(name, slots.size)
+    }
+    return slots.get(name)!
+  }
+  return { slot, defs: () => `<defs>${defs.join('')}<g id="strip">${strip.join('')}</g></defs>` }
+}
+
+export type Walking = { walk: Walk; scale: number; elapsed: number }
+
+// One walker at `scale`, `elapsed` milliseconds into his walk. Three discrete
+// animations of `x` play it: how far along the band he is, the same share of
+// his own width back, so he spans it end to end without knowing its pixels,
+// and which pose of the strip shows through his window.
+const walkerMarkup = ({ walk, scale, elapsed }: Walking, width: number, slot: (w: Walker) => number) => {
+  const span = Math.max(1, Math.floor(width / scale) - CLIP_WIDTH)
+  const introMs = walk.intro.length * TICK_MS
+  const loopMs = walk.loop.length * TICK_MS
+  const parts = elapsed < introMs
+    ? [{ frames: walk.intro, begin: -elapsed, repeat: false }, { frames: walk.loop, begin: introMs - elapsed, repeat: true }]
+    : [{ frames: walk.loop, begin: -((elapsed - introMs) % loopMs), repeat: true }]
+  const animate = (value: (w: Walker) => string | number) => parts.map(p =>
+    `<animate attributeName="x" calcMode="discrete" values="${p.frames.map(value).join(';')}" dur="${p.frames.length * TICK_MS}ms" begin="${p.begin}ms"`
+    + `${p.repeat ? ' repeatCount="indefinite"' : ' fill="freeze"'}/>`).join('')
+  const along = (w: Walker) => w.x / span
+  return `<svg overflow="visible">${animate(w => `${round(along(w) * 100)}%`)}`
+    + `<g transform="translate(0 ${BAND_HEIGHT * (1 - scale)}) scale(${HALF * scale})" shape-rendering="crispEdges">`
+    + `<svg width="${CLIP_WIDTH}" height="${BAND_ROWS}">${animate(w => round(-along(w) * CLIP_WIDTH))}`
+    + `<svg overflow="visible">${animate(w => -slot(w) * CLIP_WIDTH)}<use href="#strip"/></svg></svg></g></svg>`
+}
+
+// The band as one SVG as wide as the app makes it: the sky, then each walker
+// in turn, so the last stands in front.
+export const bandSvg = (walkers: Walking[], width: number) => {
+  const { slot, defs } = poseStrip()
+  const bodies = walkers.map(w => walkerMarkup(w, width, slot)).join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${BAND_HEIGHT}">${defs()}${skyMarkup()}${bodies}</svg>`
 }
 
 // A new mini hops out of Clawd and heads off the other way.
@@ -361,24 +436,48 @@ let walker = startWalker()
 let followers: Walker[] = []
 // Whether the terminal shows pictures (kitty, Ghostty), read at session start.
 let hasPictures = false
+// The desktop band: when the walk began, less the time the band sat idle, so
+// a new turn picks his walk up where the last one left it; when the band went
+// idle; when each mini hopped out; and the SVG as last drawn, so a redraw
+// sends the same markup.
+let since = 0
+let idleAt = 0
+let spawned: number[] = []
+let drawn: { key: string; source: string } | undefined
+let leaderWalk: { width: number; walk: Walk } | undefined
+
+// The desktop band's SVG: the minis first, so Clawd stands in front. Each mini
+// hops out of Clawd where his walk had him when it spawned.
+const desktopBand = (columns: number, hasLeader: boolean, now: number) => {
+  const width = viewWidth(columns)
+  const key = `${since} ${width} ${hasLeader} ${spawned.join(' ')}`
+  if (drawn?.key === key) return drawn.source
+  if (leaderWalk?.width !== width) leaderWalk = { width, walk: planWalk(startWalker(), width, 0, LEADER_TICKS) }
+  const { loop } = leaderWalk.walk
+  const walkers: Walking[] = spawned.map((at, i) => {
+    const t = Math.floor((at - since) / TICK_MS)
+    const mini = spawnMini(loop[t % loop.length]!, i)
+    const walk = planWalk(mini, Math.floor(width / MINI_SCALE), t + 7 * (i + 1), miniTicks(spawned.length))
+    return { walk, scale: MINI_SCALE, elapsed: now - at }
+  })
+  if (hasLeader) walkers.push({ walk: leaderWalk.walk, scale: 1, elapsed: now - since })
+  drawn = { key, source: bandSvg(walkers, width) }
+  return drawn.source
+}
 
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
     tick += 1
-    if (!band) return
-    // The desktop app redraws the SVG; the terminal swaps its picture or
-    // repaints its cells in place. A frame that cannot be painted is skipped
-    // and the next one tries.
-    if (band.surface === 'desktop' || hasPictures) {
-      const width = band.surface === 'desktop' ? viewWidth(band.columns) : pictureWidth(band.columns)
+    // The desktop's walkers animate themselves. The terminal swaps its
+    // picture or repaints its cells in place. A frame that cannot be painted
+    // is skipped and the next one tries.
+    if (band?.surface !== 'terminal') return
+    if (hasPictures) {
+      const width = pictureWidth(band.columns)
       if (band.hasLeader) walker = stepWalker(walker, width, tick)
       const count = Math.min(band.minis, MAX_MINIS)
       while (followers.length < count) followers.push(spawnMini(walker, followers.length))
       followers = followers.slice(0, count).map((m, i) => stepWalker(m, Math.floor(width / MINI_SCALE), tick + 7 * (i + 1)))
-    }
-    if (band.surface === 'desktop') {
-      $.ui.invalidate('ui.render')
-    } else if (hasPictures) {
       const source = pictureSource(band.hasLeader ? walker : null, pictureWidth(band.columns), followers)
       $.ui.blit({ requestId: band.id, key: KEY, source }).catch(() => {})
     } else {
@@ -404,10 +503,15 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
-    if (!timer) tick = 0
+    if (!timer) {
+      tick = 0
+      since += (await $.clock.now()) - idleAt
+      spawned = []
+    }
     await update($, working, () => e.turnId)
     await update($, commands, () => [])
     start($)
+    $.ui.invalidate('ui.render')
     return next(e)
   })
 
@@ -417,6 +521,7 @@ export const register: Register = on => {
     if (agentId) {
       await update($, agents, a => (a.includes(agentId) ? a : [...a, agentId]))
       start($)
+      $.ui.invalidate('ui.render')
     }
     return ran
   })
@@ -431,6 +536,7 @@ export const register: Register = on => {
     if (agentId && !(await read($, agents)).includes(agentId)) {
       await update($, agents, a => (a.includes(agentId) ? a : [...a, agentId]))
       start($)
+      $.ui.invalidate('ui.render')
     }
     if (!agentId && !/^(Task|TodoWrite|SubagentHandback)/.test(String(call.tool))) {
       const line = describeCommand(call)
@@ -469,13 +575,17 @@ export const register: Register = on => {
     } else if (e.turnId === (await read($, working))) {
       await update($, working, () => null)
     }
-    if (!(await read($, working)) && (await read($, agents)).length === 0) stop()
+    if (!(await read($, working)) && (await read($, agents)).length === 0) {
+      stop()
+      idleAt = await $.clock.now()
+    }
+    $.ui.invalidate('ui.render')
     return next(e)
   })
 
   // The band spans the window, so a resize redraws it at the new width. The
-  // terminal draws cells; the desktop app, which has no Raster, an SVG of
-  // Clawd walking the band and nothing else.
+  // terminal draws cells; the desktop app, which has no Raster, the sky and
+  // an SVG for each walker, and nothing else.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const hasLeader = (await read($, working)) !== null
     const minis = (await read($, agents)).length
@@ -484,22 +594,19 @@ export const register: Register = on => {
     if (isIdle || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
     if (e.surface === 'desktop') {
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
+      const now = await $.clock.now()
+      while (spawned.length < Math.min(minis, MAX_MINIS)) spawned.push(now)
+      spawned = spawned.slice(0, minis)
       const { Box, Svg } = $.ui.resolve(e)
-      const source = walkerSvg(hasLeader ? walker : null, viewWidth(columns), followers.slice(0, minis))
-      const sky = <Svg source={skySvg()} height={BAND_HEIGHT} alt="A starry sky" />
-      // The app paints a placed Box over everything before it. So one copy
-      // of the sky holds the band's height, the sky color runs past the
-      // band's edges to cover its padding, a second copy of the sky goes on
-      // top, and the walkers over that.
+      // The app paints a placed Box over everything before it. So the sky holds
+      // the band's height, the sky color runs past the band's edges to cover
+      // its padding, and the band's own SVG, its sky and walkers, goes on top.
       return (
         <Box position="relative" flexDirection="column">
-          {sky}
+          <Svg source={skySvg()} height={BAND_HEIGHT} alt="A starry sky" />
           <Box position="absolute" top={-2} left={-2} right={-2} bottom={-2} backgroundColor={SKY} />
           <Box position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column">
-            {sky}
-          </Box>
-          <Box position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column">
-            <Svg source={source} height={BAND_HEIGHT} alt="Clawd walking along the prompt box" />
+            <Svg source={desktopBand(columns, hasLeader, now)} height={BAND_HEIGHT} alt="Clawd walking along the prompt box" />
           </Box>
         </Box>
       )

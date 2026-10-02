@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, RenderElement } from 'claude-code'
 
-import { checklist, describeCommand, frame, picture, skySvg, starfield, startWalker, stepWalker, walkerFrame, walkerSvg } from './register'
+import { bandSvg, checklist, describeCommand, frame, miniTicks, picture, planWalk, skySvg, starfield, startWalker, stepWalker, walkerFrame } from './register'
 import type { Walker } from './register'
 
 const ORANGE = 0xd77757
@@ -192,19 +192,27 @@ test('each tick of the timer repaints the band with the next frame', async ($, o
 })
 
 test('the desktop app draws him walking as an SVG; a narrow terminal and the editor draw nothing', async ($, on) => {
-  engine(on)
+  const { blits, tick } = engine(on)
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
-  // One copy of the sky holds the band's height under the sky color; the
-  // other shows, and the walkers go over it.
-  const [under, sky, drawn] = await desktop.findAll({ type: 'Svg' })
-  expect(under?.props).toEqual(sky?.props)
+  // The sky holds the band's height under the sky color, and the band goes
+  // over it.
+  const [sky, drawn] = await desktop.findAll({ type: 'Svg' })
   expect(sky?.props).toMatchObject({ source: skySvg(), height: 52.5 })
-  // 100 columns of about 6 CSS pixels is 240 half pixels of 2.5 to walk.
-  expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 240), height: 52.5 })
+  // 100 columns of about 6 CSS pixels is 240 half pixels of 2.5 to walk. The
+  // SVG animates itself, so it draws in a frame where SMIL plays.
+  const source = bandSvg([{ walk: planWalk(startWalker(), 240, 0, 3000), scale: 1, elapsed: 0 }], 240)
+  expect(drawn?.props).toMatchObject({ source, height: 52.5 })
   expect(drawn?.props.width).toBeUndefined()
   expect(await desktop.find({ type: 'Text' })).toBeUndefined()
+  // The timer sends the desktop nothing, and a redraw sends the same SVG.
+  tick()
+  for (let i = 0; i < 50; i++) await Promise.resolve()
+  expect(blits).toEqual([])
   await desktop.unmount()
+  const again = await mount($, 'desktop')
+  expect((await again.findAll({ type: 'Svg' }))[1]?.props.source).toBe(source)
+  await again.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
     expect(await ui.find({ type: 'Svg' })).toBeUndefined()
@@ -294,29 +302,86 @@ test('after a stretch of walking he stops to look, wave, jump or turn, then walk
   expect(w.until).toBeGreaterThanOrEqual(30)
 })
 
-test('the SVG draws his frame where he stands, his eyes left as holes', () => {
-  const w: Walker = { ...startWalker(), x: 7, clip: 'looking', at: 0 }
-  const source = walkerSvg(w, 100)
-  expect(source).toContain('width="100%" height="52.5"')
-  // 7 of the 76 half pixels he can walk is 9.2% along, less 9.2% of his width.
-  expect(source).toContain('<svg x="9.2%" overflow="visible"><g transform="translate(-5.5 0) scale(2.5)">')
-  // The front frame: his body's top row runs 16 half pixels from x 4.
-  expect(source).toContain('<rect x="4" y="5" width="16" height="1" fill="#d97757"/>')
-  // Its eye row: body, two eye cells left empty, body again.
-  expect(source).toContain('<rect x="4" y="7" width="2" height="1" fill="#d97757"/>')
-  expect(source).toContain('<rect x="8" y="7" width="8" height="1" fill="#d97757"/>')
-  expect(source).not.toContain('fill="#141413"')
+test('a new turn on the desktop picks his walk up where the last one left it', async ($, on) => {
+  const { clock } = engine(on)
+  const walk = planWalk(startWalker(), 240, 0, 3000)
+  const drawnAt = async (elapsed: number) => {
+    const desktop = await mount($, 'desktop')
+    expect((await desktop.findAll({ type: 'Svg' }))[1]?.props.source).toBe(bandSvg([{ walk, scale: 1, elapsed }], 240))
+    await desktop.unmount()
+  }
+  clock.now = 5000
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  clock.now = 7000
+  await drawnAt(2000)
+  await complete($, 't1')
+  // Idle for a minute, then two more seconds of walking.
+  clock.now = 67000
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  clock.now = 69000
+  await drawnAt(4000)
+  await complete($, 't2')
 })
 
-test('minis stand a quarter smaller on the same line, behind Clawd, with no sky in their SVG', () => {
-  const mini: Walker = { ...startWalker(), x: 40 }
-  const source = walkerSvg(startWalker(), 100, [mini])
-  expect(source).not.toContain('fill="#151515"')
-  expect(skySvg()).toContain('fill="#151515"')
-  expect(source).toContain('<svg x="36.7%" overflow="visible"><g transform="translate(-16.5 13.125) scale(1.875)">')
+test('the SVG draws his frame where he stands, his eyes left as holes, on its own sky', () => {
+  const w: Walker = { ...startWalker(), x: 7, clip: 'looking', at: 0 }
+  const source = bandSvg([{ walk: { intro: [], loop: [w] }, scale: 1, elapsed: 0 }], 100)
+  expect(source).toContain('width="100%" height="52.5"')
+  // The app's frame is white where the SVG is clear, so the sky comes along.
+  expect(source).toContain(`<rect width="100%" height="100%" fill="#151515"/>`)
+  expect(source).toContain(starfield(1000))
+  // 7 of the 76 half pixels he can walk is 9.2% along, less 9.2% of his width.
+  expect(source).toContain('values="9.2%"')
+  expect(source).toContain('values="-2.2"')
+  expect(source).toContain('<g transform="translate(0 0) scale(2.5)"')
+  // The front frame: his body's top row runs 16 half pixels from x 4. Its eye
+  // row: body, two eye cells left empty, body again.
+  expect(source).toContain('M4 5h16v1h-16z')
+  expect(source).toContain('M4 7h2v1h-2zM8 7h8v1h-8z')
+  // Facing left, the same pose is drawn mirrored.
+  expect(bandSvg([{ walk: { intro: [], loop: [{ ...w, dir: -1 }] }, scale: 1, elapsed: 0 }], 100))
+    .toContain('transform="translate(24 0) scale(-1 1)"')
+})
+
+test('his walk loops from home back home and picks up where it was', () => {
+  for (const width of [76, 240, 1228]) {
+    const walk = planWalk(startWalker(), width, 0, 3000)
+    expect(walk.intro).toEqual([])
+    expect(walk.loop[0]).toEqual(startWalker())
+    expect(stepWalker(walk.loop.at(-1)!, width, walk.loop.length)).toMatchObject({ x: 0, dir: 1, clip: 'walking', at: -1 })
+  }
+  // Each frame lasts a tick; a redraw a second in starts the loop a second back.
+  const walk = planWalk(startWalker(), 240, 0, 3000)
+  const at = (elapsed: number) => bandSvg([{ walk, scale: 1, elapsed }], 240)
+  expect(at(0)).toContain(`dur="${walk.loop.length * 83}ms" begin="0ms" repeatCount="indefinite"`)
+  expect(at(1000)).toContain('begin="-1000ms" repeatCount="indefinite"')
+  // Too short for a lap, he plays what he has.
+  expect(planWalk(startWalker(), 1228, 0, 100).loop).toHaveLength(100)
+})
+
+test('Clawd and eight minis fit in one Svg however wide the band', () => {
+  for (const width of [76, 240, 1228]) {
+    const minis = Array.from({ length: 8 }, (_, i) => ({
+      walk: planWalk({ ...startWalker(), x: 30, dir: -1 as const, clip: 'jumping' as const, at: 0 }, Math.floor(width / 0.75), i, miniTicks(8)),
+      scale: 0.75,
+      elapsed: 0,
+    }))
+    const leader = { walk: planWalk(startWalker(), width, 0, 3000), scale: 1, elapsed: 0 }
+    expect(bandSvg([...minis, leader], width).length).toBeLessThanOrEqual(131072)
+  }
+})
+
+test('minis stand a quarter smaller on the same line, behind Clawd, and walk home before they loop', () => {
+  const mini: Walker = { ...startWalker(), x: 40, dir: -1, clip: 'jumping', at: 0 }
+  const walk = planWalk(mini, Math.floor(100 / 0.75), 7, miniTicks(1))
+  expect(walk.intro[0]).toEqual(mini)
+  expect(walk.loop[0]).toMatchObject({ x: 0, dir: 1, clip: 'walking', at: -1 })
+  const source = bandSvg([{ walk, scale: 0.75, elapsed: 0 }, { walk: planWalk(startWalker(), 100, 0, 3000), scale: 1, elapsed: 0 }], 100)
   expect(source.indexOf('scale(1.875)')).toBeLessThan(source.lastIndexOf('scale(2.5)'))
-  // With no main turn, only the minis walk.
-  expect(walkerSvg(null, 100, [mini]).match(/overflow="visible"/g)).toHaveLength(1)
+  expect(source).toContain('<g transform="translate(0 13.125) scale(1.875)"')
+  // The walk home plays once and holds; the loop starts as it ends.
+  expect(source).toContain(`dur="${walk.intro.length * 83}ms" begin="0ms" fill="freeze"`)
+  expect(source).toContain(`begin="${walk.intro.length * 83}ms" repeatCount="indefinite"`)
 })
 
 test('the sky is the same every frame and stays inside the band', () => {
