@@ -28,6 +28,12 @@ const COLUMN = 6
 // The band shows the clips from this row down: the top of his raised arm in
 // the wave. The jump rises higher, so it hops only as high as the wave.
 const TOP = 9
+// The minis' size next to Clawd.
+const MINI_SCALE = 0.75
+// The sky's colors, from the claude.dev page, and its clusters' dot spacing.
+const SKY = '#151515'
+const STAR = '#8c8c8c'
+const GRID = 2.4
 const BAND_HEIGHT = (CLIP_HEIGHT - TOP) * HALF
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
@@ -183,9 +189,10 @@ export const walkerFrame = (w: Walker) => {
   return w.dir < 0 ? rows.map(row => [...row].reverse().join('')) : rows
 }
 
-// The band as SVG markup, `width` half pixels wide: each row's runs of one
-// color as rectangles, his eyes left as holes.
-export const walkerSvg = (w: Walker, width: number) => {
+// Clawd's rects where he stands: each row's runs of one color, his eyes left
+// as holes. Rows above TOP are cut, so a frame that reaches higher (the jump)
+// is moved down to fit.
+const walkerRects = (w: Walker) => {
   const rects: string[] = []
   const rows = walkerFrame(w)
   const shift = Math.max(0, TOP - rows.findIndex(row => /[^.]/.test(row))) - TOP
@@ -200,15 +207,72 @@ export const walkerSvg = (w: Walker, width: number) => {
       x = end
     }
   })
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width * HALF}" height="${BAND_HEIGHT}" `
-    + `viewBox="0 0 ${width} ${CLIP_HEIGHT - TOP}" shape-rendering="crispEdges">${rects.join('')}</svg>`
+  return rects.join('')
 }
+
+// A number from 0 to 1 that depends only on `n`, so the sky stays the same
+// from frame to frame.
+const hash = (n: number) => {
+  let x = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b)
+  x ^= x >>> 13
+  x = Math.imul(x, 0xc2b2ae35)
+  x ^= x >>> 16
+  return (x >>> 0) / 2 ** 32
+}
+const round = (n: number) => Math.round(n * 10) / 10
+
+// The sky behind him, `width` half pixels wide: a dark field, single stars,
+// and clusters of dots on a grid that thin out toward their edges.
+export const starfield = (width: number) => {
+  const height = CLIP_HEIGHT - TOP
+  const dots = [`<rect width="${width}" height="${height}" fill="${SKY}"/>`]
+  for (let i = 0; i < width / 5; i++) {
+    const r = round(0.3 + 0.3 * hash(i * 3 + 2))
+    const opacity = round(0.3 + 0.5 * hash(i * 3 + 3))
+    dots.push(`<circle cx="${round(hash(i * 3) * width)}" cy="${round(hash(i * 3 + 1) * height)}" r="${r}" fill="${STAR}" opacity="${opacity}"/>`)
+  }
+  for (let i = 0; i < Math.max(1, width / 80); i++) {
+    const seed = 1000 + i * 5
+    const cx = hash(seed) * width
+    const cy = hash(seed + 1) * height
+    const size = 3 + 4 * hash(seed + 2)
+    for (let gx = Math.ceil((cx - size) / GRID); gx * GRID <= cx + size; gx++) {
+      for (let gy = Math.ceil((cy - size) / GRID); gy * GRID <= cy + size; gy++) {
+        const far = Math.hypot(gx * GRID - cx, gy * GRID - cy) / size
+        if (far >= 1 || gx < 0 || gy < 0 || gx * GRID > width || gy * GRID > height || hash(seed + gx * 131 + gy * 7) < 0.3 + far / 2) continue
+        dots.push(`<circle cx="${round(gx * GRID)}" cy="${round(gy * GRID)}" r="${round(0.7 * (1 - far / 2))}" fill="${STAR}" opacity="0.5"/>`)
+      }
+    }
+  }
+  return dots.join('')
+}
+const skies = new Map<number, string>()
+
+// The band as SVG markup, `width` half pixels wide: the sky, the minis a
+// quarter smaller standing on the same line, and Clawd in front.
+export const walkerSvg = (w: Walker | null, width: number, minis: Walker[] = []) => {
+  const height = CLIP_HEIGHT - TOP
+  if (!skies.has(width)) skies.set(width, starfield(width))
+  const small = minis.map(m => `<g transform="translate(0 ${height * (1 - MINI_SCALE)}) scale(${MINI_SCALE})">${walkerRects(m)}</g>`)
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width * HALF}" height="${BAND_HEIGHT}" viewBox="0 0 ${width} ${height}">`
+    + `${skies.get(width)}<g shape-rendering="crispEdges">${small.join('')}${w ? walkerRects(w) : ''}</g></svg>`
+}
+
+// A new mini hops out of Clawd and heads off the other way.
+const spawnMini = (leader: Walker, i: number): Walker => ({
+  x: Math.round(leader.x / MINI_SCALE),
+  dir: (i % 2 ? leader.dir : -leader.dir) as 1 | -1,
+  clip: 'jumping',
+  at: 0,
+  until: 0,
+})
 
 // What the band last drew, for the timer's repaints between draws.
 let timer: Timer | undefined
 let tick = 0
 let band: { id: string; surface: string; columns: number; minis: number; hasLeader: boolean } | undefined
 let walker = startWalker()
+let followers: Walker[] = []
 
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
@@ -217,7 +281,11 @@ function start($: EngineInterface) {
     // The desktop app redraws the SVG; the terminal repaints its cells in
     // place. A frame that cannot be painted is skipped and the next one tries.
     if (band.surface === 'desktop') {
-      walker = stepWalker(walker, viewWidth(band.columns), tick)
+      const width = viewWidth(band.columns)
+      if (band.hasLeader) walker = stepWalker(walker, width, tick)
+      const count = Math.min(band.minis, MAX_MINIS)
+      while (followers.length < count) followers.push(spawnMini(walker, followers.length))
+      followers = followers.slice(0, count).map((m, i) => stepWalker(m, Math.floor(width / MINI_SCALE), tick + 7 * (i + 1)))
       $.ui.invalidate('ui.render')
     } else {
       const cells = frame(Math.floor(tick / 2), band.columns, band.minis, band.hasLeader)
@@ -322,12 +390,11 @@ export const register: Register = on => {
     const isIdle = !hasLeader && minis === 0
     if (isIdle || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
     if (e.surface === 'desktop') {
-      if (!hasLeader) return next(e)
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
       const { Svg } = $.ui.resolve(e)
       return (
         <Svg
-          source={walkerSvg(walker, viewWidth(columns))}
+          source={walkerSvg(hasLeader ? walker : null, viewWidth(columns), followers.slice(0, minis))}
           width={columns * COLUMN}
           height={BAND_HEIGHT}
           alt="Clawd walking along the prompt box"

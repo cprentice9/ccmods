@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { checklist, describeCommand, frame, startWalker, stepWalker, walkerFrame, walkerSvg } from './register.tsx'
+import { checklist, describeCommand, frame, starfield, startWalker, stepWalker, walkerFrame, walkerSvg } from './register.tsx'
 import type { Walker } from './register.tsx'
 
 const ORANGE = 0xd77757
@@ -292,4 +292,22 @@ test('the SVG draws his frame where he stands, his eyes left as holes', () => {
   expect(source).toContain('<rect x="11" y="7" width="2" height="1" fill="#d97757"/>')
   expect(source).toContain('<rect x="15" y="7" width="8" height="1" fill="#d97757"/>')
   expect(source).not.toContain('fill="#141413"')
+})
+
+test('minis stand a quarter smaller on the same line, behind Clawd, under the sky', () => {
+  const mini: Walker = { ...startWalker(), x: 40 }
+  const source = walkerSvg(startWalker(), 100, [mini])
+  expect(source.indexOf('fill="#151515"')).toBeLessThan(source.indexOf('scale(0.75)'))
+  expect(source).toContain('<g transform="translate(0 5.25) scale(0.75)"><rect x="51"')
+  expect(source.indexOf('scale(0.75)')).toBeLessThan(source.lastIndexOf('<rect x="11"'))
+  // With no main turn, only the minis walk.
+  expect(walkerSvg(null, 100, [mini]).match(/<g transform/g)).toHaveLength(1)
+})
+
+test('the sky is the same every frame and stays inside the band', () => {
+  expect(starfield(300)).toBe(starfield(300))
+  for (const [, cx, cy] of starfield(300).matchAll(/cx="([\d.]+)" cy="([\d.]+)"/g)) {
+    expect(Number(cx)).toBeLessThanOrEqual(300)
+    expect(Number(cy)).toBeLessThanOrEqual(21)
+  }
 })
