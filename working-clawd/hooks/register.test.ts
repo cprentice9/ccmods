@@ -188,7 +188,9 @@ test('the desktop app draws him walking as an SVG; a narrow terminal and the edi
   engine(on)
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const desktop = await mount($, 'desktop')
-  const drawn = await desktop.find({ type: 'Svg' })
+  // An empty SVG holds the band's height; the second draws him.
+  const [spacer, drawn] = await desktop.findAll({ type: 'Svg' })
+  expect(spacer?.props.source).not.toContain('<rect')
   // 100 columns of about 6 CSS pixels is 240 half pixels of 2.5 to walk.
   expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 240), height: 52.5 })
   expect(drawn?.props.width).toBeUndefined()
