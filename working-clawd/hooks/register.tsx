@@ -261,7 +261,13 @@ const stars = (width: number) => {
 
 export const starfield = (width: number) =>
   stars(width).map(d => `<circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${STAR}" opacity="${d.opacity}"/>`).join('')
+
+// The sky as its own SVG, built once. It never changes, so the app decodes it
+// once and each frame resends only the walkers.
 let sky: string | undefined
+export const skySvg = () =>
+  (sky ??= `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${BAND_HEIGHT}">`
+    + `<rect width="100%" height="100%" fill="${SKY}"/><g transform="scale(${HALF})">${starfield(SKY_WIDTH)}</g></svg>`)
 
 // One walker at `scale`, `at` of the way along whatever width the app gives
 // the band: a percentage, less that share of his own width, so he spans it
@@ -272,16 +278,15 @@ const placed = (w: Walker, at: number, scale: number) => {
     + `<g transform="translate(${round(-at * CLIP_WIDTH * size)} ${BAND_HEIGHT * (1 - scale)}) scale(${size})">${walkerRects(w)}</g></svg>`
 }
 
-// The band as SVG markup in CSS pixels, as wide as the app makes it: the sky,
-// the minis a quarter smaller standing on the same line, and Clawd in front.
-// `width` is the walk's length in half pixels, a guess from the columns, so
-// a wrong guess changes only how fast they cross.
+// The walkers as SVG markup in CSS pixels, as wide as the app makes the band,
+// clear where the sky shows through: the minis a quarter smaller standing on
+// the same line, and Clawd in front. `width` is the walk's length in half
+// pixels, a guess from the columns, so a wrong guess changes only how fast
+// they cross.
 export const walkerSvg = (w: Walker | null, width: number, minis: Walker[] = []) => {
-  sky ??= starfield(SKY_WIDTH)
   const along = (m: Walker, scale: number) => m.x / Math.max(1, Math.floor(width / scale) - CLIP_WIDTH)
   const small = minis.map(m => placed(m, along(m, MINI_SCALE), MINI_SCALE))
   return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${BAND_HEIGHT}">`
-    + `<rect width="100%" height="100%" fill="${SKY}"/><g transform="scale(${HALF})">${sky}</g>`
     + `<g shape-rendering="crispEdges">${small.join('')}${w ? placed(w, along(w, 1), 1) : ''}</g></svg>`
 }
 
@@ -416,21 +421,18 @@ export const register: Register = on => {
     return ran
   })
 
-  // A step from a subagent that already finished means it resumed.
-  on('turn.step', async function* ($, e, next) {
-    const { agentId } = e
+  // The main loop's TaskCreate and TaskUpdate calls keep the checklist.
+  // Its other calls feed the latest-command line as they start. A call from
+  // a subagent that already finished means it resumed. That check sits here,
+  // not on turn.step, which would pass every streamed chunk through the mod.
+  on('tool.call', async ($, e, next) => {
+    const call = e as unknown as Record<string, any>
+    const agentId = call.agentId as string | undefined
     if (agentId && !(await read($, agents)).includes(agentId)) {
       await update($, agents, a => (a.includes(agentId) ? a : [...a, agentId]))
       start($)
     }
-    return yield* next(e)
-  })
-
-  // The main loop's TaskCreate and TaskUpdate calls keep the checklist.
-  // Its other calls feed the latest-command line as they start.
-  on('tool.call', async ($, e, next) => {
-    const call = e as unknown as Record<string, any>
-    if (!call.agentId && !/^(Task|TodoWrite|SubagentHandback)/.test(String(call.tool))) {
+    if (!agentId && !/^(Task|TodoWrite|SubagentHandback)/.test(String(call.tool))) {
       const line = describeCommand(call)
       await update($, commands, list => [...list, line].slice(-MAX_COMMANDS))
     }
@@ -484,16 +486,20 @@ export const register: Register = on => {
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
       const { Box, Svg } = $.ui.resolve(e)
       const source = walkerSvg(hasLeader ? walker : null, viewWidth(columns), followers.slice(0, minis))
-      const drawing = <Svg source={source} height={BAND_HEIGHT} alt="Clawd walking along the prompt box" />
+      const sky = <Svg source={skySvg()} height={BAND_HEIGHT} alt="A starry sky" />
       // The app paints a placed Box over everything before it. So one copy
-      // of the drawing holds the band's height, the sky color runs past the
-      // band's edges to cover its padding, and a second copy goes on top.
+      // of the sky holds the band's height, the sky color runs past the
+      // band's edges to cover its padding, a second copy of the sky goes on
+      // top, and the walkers over that.
       return (
         <Box position="relative" flexDirection="column">
-          {drawing}
+          {sky}
           <Box position="absolute" top={-2} left={-2} right={-2} bottom={-2} backgroundColor={SKY} />
           <Box position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column">
-            {drawing}
+            {sky}
+          </Box>
+          <Box position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column">
+            <Svg source={source} height={BAND_HEIGHT} alt="Clawd walking along the prompt box" />
           </Box>
         </Box>
       )
