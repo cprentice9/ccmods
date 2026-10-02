@@ -53,8 +53,8 @@ const engine = (on: On) => {
   on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.blit', (_$, e) => {
-    const blit = e as { cells?: string; source?: { rgba: string } }
-    blits.push(blit.cells ?? blit.source!.rgba)
+    const blit = e as { cells?: string; source?: { png: string } }
+    blits.push(blit.cells ?? blit.source!.png)
     return {}
   })
   on('clock.every', async (_$, e) => {
@@ -362,14 +362,19 @@ test('in Ghostty the band is the picture, swapped each tick', async ($, on) => {
   await $.turn.start({ text: 'hi', turnId: 't1' })
   const ui = await mount($, 'terminal')
   const drawn = await ui.find({ type: 'Image' })
-  // 100 columns at 3.5 pixels each, over the band's 3 rows.
+  // 100 columns at 3.5 pixels each, over the band's 3 rows, as a PNG four
+  // times larger: 1400 by 84.
   expect(drawn?.props).toMatchObject({ columns: 100, rows: 3 })
-  expect((drawn?.props.source as { width: number }).width).toBe(350)
+  const png = Uint8Array.fromBase64((drawn?.props.source as { png: string }).png)
+  expect([...png.slice(1, 4)].map(c => String.fromCharCode(c)).join('')).toBe('PNG')
+  const view = new DataView(png.buffer)
+  expect([view.getUint32(16), view.getUint32(20)]).toEqual([1400, 84])
   expect(await ui.find({ type: 'Raster' })).toBeUndefined()
   tick()
   for (let i = 0; i < 50 && blits.length === 0; i++) await Promise.resolve()
   expect(blits).toHaveLength(1)
-  expect(Uint8Array.fromBase64(blits[0]!).length).toBe(350 * 21 * 4)
+  // Runs of one color compress well: far under the 353 KB of raw pixels.
+  expect(Uint8Array.fromBase64(blits[0]!).length).toBeLessThan(40000)
   await ui.unmount()
   await complete($, 't1')
 })

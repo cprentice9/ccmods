@@ -5,6 +5,7 @@ import type { WorkingTask, WorkingTasks, WorkingTurn } from '../types'
 
 import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS } from './clips'
 import type { ClipName } from './clips'
+import { encodePng } from './png'
 
 const KEY = 'clawd'
 const BIG = 18
@@ -41,6 +42,7 @@ const BAND_HEIGHT = BAND_ROWS * HALF
 // image pixel to a half pixel. A cell is about twice as tall as it is wide,
 // so each column takes half as many pixels as each row.
 const PICTURE_ROWS = 3
+const PICTURE_SCALE = 4
 const pictureWidth = (columns: number) => Math.round((columns * BAND_ROWS) / PICTURE_ROWS / 2)
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
@@ -328,15 +330,23 @@ const paint = (px: Uint8Array, width: number, w: Walker, scale: number) => {
   }
 }
 
-// The band as a picture for kitty and Ghostty, `width` pixels wide: the sky,
-// the minis, and Clawd in front, as the desktop draws them.
-export const picture = (w: Walker | null, width: number, minis: Walker[] = []) => {
+// The band as RGBA pixels for kitty and Ghostty, `width` wide: the sky, the
+// minis, and Clawd in front, as the desktop draws them.
+const scene = (w: Walker | null, width: number, minis: Walker[]) => {
   if (!skies.has(width)) skies.set(width, skyPixels(width))
   const px = skies.get(width)!.slice()
   for (const m of minis) paint(px, width, m, MINI_SCALE)
   if (w) paint(px, width, w, 1)
-  return { rgba: px.toBase64(), width, height: BAND_ROWS }
+  return px
 }
+
+export const picture = (w: Walker | null, width: number, minis: Walker[] = []) =>
+  ({ rgba: scene(w, width, minis).toBase64(), width, height: BAND_ROWS })
+
+// What the Image shows: the scene as a PNG PICTURE_SCALE times larger, or as
+// large as the 4096 pixel limit allows, so the terminal barely stretches it.
+export const pictureSource = (w: Walker | null, width: number, minis: Walker[] = []) =>
+  ({ png: encodePng(scene(w, width, minis), width, BAND_ROWS, Math.max(1, Math.min(PICTURE_SCALE, Math.floor(4096 / width)))) })
 
 // What the band last drew, for the timer's repaints between draws.
 let timer: Timer | undefined
@@ -364,7 +374,7 @@ function start($: EngineInterface) {
     if (band.surface === 'desktop') {
       $.ui.invalidate('ui.render')
     } else if (hasPictures) {
-      const source = picture(band.hasLeader ? walker : null, pictureWidth(band.columns), followers)
+      const source = pictureSource(band.hasLeader ? walker : null, pictureWidth(band.columns), followers)
       $.ui.blit({ requestId: band.id, key: KEY, source }).catch(() => {})
     } else {
       const cells = frame(Math.floor(tick / 2), band.columns, band.minis, band.hasLeader)
@@ -492,7 +502,7 @@ export const register: Register = on => {
     band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
     const { Box, Image, Raster, Text } = $.ui.resolve(e)
     if (hasPictures) {
-      const source = picture(hasLeader ? walker : null, pictureWidth(columns), followers.slice(0, minis))
+      const source = pictureSource(hasLeader ? walker : null, pictureWidth(columns), followers.slice(0, minis))
       return <Image key={KEY} source={source} columns={columns} rows={PICTURE_ROWS} alt="Clawd walking along the prompt" />
     }
     const progress = checklist(await read($, tasks))
