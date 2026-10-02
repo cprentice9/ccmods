@@ -35,7 +35,13 @@ const STAR = '#8c8c8c'
 const GRID = 2.4
 // Half pixels of sky drawn, wider than any window; the app cuts it to the band.
 const SKY_WIDTH = 1000
-const BAND_HEIGHT = (CLIP_HEIGHT - TOP) * HALF
+const BAND_ROWS = CLIP_HEIGHT - TOP
+const BAND_HEIGHT = BAND_ROWS * HALF
+// The same scene in kitty and Ghostty, as a picture three rows tall, one
+// image pixel to a half pixel. A cell is about twice as tall as it is wide,
+// so each column takes half as many pixels as each row.
+const PICTURE_ROWS = 3
+const pictureWidth = (columns: number) => Math.round((columns * BAND_ROWS) / PICTURE_ROWS / 2)
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 const tasks = atom({ plugin: 'working-clawd', key: 'tasks' } as const, {} as WorkingTasks)
@@ -190,15 +196,19 @@ export const walkerFrame = (w: Walker) => {
   return w.dir < 0 ? rows.map(row => [...row].reverse().join('')) : rows
 }
 
+// His frame's rows from TOP down, BAND_ROWS of them. A frame that reaches
+// higher (the jump) is moved down to fit.
+const bandRows = (w: Walker) => {
+  const rows = walkerFrame(w)
+  const lift = Math.max(0, TOP - rows.findIndex(row => /[^.]/.test(row)))
+  return Array.from({ length: BAND_ROWS }, (_, y) => rows[y + TOP - lift] ?? '')
+}
+
 // Clawd's rects, from his left edge: each row's runs of one color, his eyes left
-// as holes. Rows above TOP are cut, so a frame that reaches higher (the jump)
-// is moved down to fit.
+// as holes.
 const walkerRects = (w: Walker) => {
   const rects: string[] = []
-  const rows = walkerFrame(w)
-  const shift = Math.max(0, TOP - rows.findIndex(row => /[^.]/.test(row))) - TOP
-  rows.forEach((row, at) => {
-    const y = at + shift
+  bandRows(w).forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
       const fill = COLORS[row[x]!]
       if (!fill) continue
@@ -224,29 +234,31 @@ const round = (n: number) => Math.round(n * 10) / 10
 
 // The stars behind him, `width` half pixels wide: single stars, and clusters
 // of dots on a grid that thin out toward their edges.
-export const starfield = (width: number) => {
-  const height = CLIP_HEIGHT - TOP
-  const dots: string[] = []
+const stars = (width: number) => {
+  const dots: { x: number; y: number; r: number; opacity: number }[] = []
   for (let i = 0; i < width / 5; i++) {
     const r = round(0.3 + 0.3 * hash(i * 3 + 2))
     const opacity = round(0.3 + 0.5 * hash(i * 3 + 3))
-    dots.push(`<circle cx="${round(hash(i * 3) * width)}" cy="${round(hash(i * 3 + 1) * height)}" r="${r}" fill="${STAR}" opacity="${opacity}"/>`)
+    dots.push({ x: round(hash(i * 3) * width), y: round(hash(i * 3 + 1) * BAND_ROWS), r, opacity })
   }
   for (let i = 0; i < Math.max(1, width / 80); i++) {
     const seed = 1000 + i * 5
     const cx = hash(seed) * width
-    const cy = hash(seed + 1) * height
+    const cy = hash(seed + 1) * BAND_ROWS
     const size = 3 + 4 * hash(seed + 2)
     for (let gx = Math.ceil((cx - size) / GRID); gx * GRID <= cx + size; gx++) {
       for (let gy = Math.ceil((cy - size) / GRID); gy * GRID <= cy + size; gy++) {
         const far = Math.hypot(gx * GRID - cx, gy * GRID - cy) / size
-        if (far >= 1 || gx < 0 || gy < 0 || gx * GRID > width || gy * GRID > height || hash(seed + gx * 131 + gy * 7) < 0.3 + far / 2) continue
-        dots.push(`<circle cx="${round(gx * GRID)}" cy="${round(gy * GRID)}" r="${round(0.7 * (1 - far / 2))}" fill="${STAR}" opacity="0.5"/>`)
+        if (far >= 1 || gx < 0 || gy < 0 || gx * GRID > width || gy * GRID > BAND_ROWS || hash(seed + gx * 131 + gy * 7) < 0.3 + far / 2) continue
+        dots.push({ x: round(gx * GRID), y: round(gy * GRID), r: round(0.7 * (1 - far / 2)), opacity: 0.5 })
       }
     }
   }
-  return dots.join('')
+  return dots
 }
+
+export const starfield = (width: number) =>
+  stars(width).map(d => `<circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${STAR}" opacity="${d.opacity}"/>`).join('')
 let sky: string | undefined
 
 // One walker at `scale`, `at` of the way along whatever width the app gives
@@ -280,26 +292,80 @@ const spawnMini = (leader: Walker, i: number): Walker => ({
   until: 0,
 })
 
+const rgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16))
+const SKY_RGB = rgb(SKY)
+const STAR_RGB = rgb(STAR)
+const CELL_RGB = Object.fromEntries(Object.entries(COLORS).map(([cell, hex]) => [cell, rgb(hex)]))
+
+// The sky as RGBA pixels, `width` by BAND_ROWS, each star one pixel mixed
+// into the dark at its opacity.
+const skyPixels = (width: number) => {
+  const px = new Uint8Array(width * BAND_ROWS * 4)
+  for (let i = 0; i < px.length; i += 4) px.set([...SKY_RGB, 255], i)
+  for (const d of stars(width)) {
+    const x = Math.floor(d.x)
+    const y = Math.floor(d.y)
+    if (x >= width || y >= BAND_ROWS) continue
+    px.set(SKY_RGB.map((c, k) => Math.round(c + (STAR_RGB[k]! - c) * d.opacity)), (y * width + x) * 4)
+  }
+  return px
+}
+const skies = new Map<number, Uint8Array>()
+
+// One walker painted into `px` at `scale`, standing on the bottom edge, each
+// pixel taking the frame cell under it.
+const paint = (px: Uint8Array, width: number, w: Walker, scale: number) => {
+  const rows = bandRows(w)
+  const tall = Math.round(BAND_ROWS * scale)
+  const left = Math.round(w.x * scale)
+  for (let ty = 0; ty < tall; ty++) {
+    const row = rows[Math.floor(ty / scale)]!
+    for (let tx = 0; tx < Math.round(CLIP_WIDTH * scale); tx++) {
+      const color = CELL_RGB[row[Math.floor(tx / scale)] ?? '.']
+      const x = left + tx
+      if (color && x < width) px.set(color, ((BAND_ROWS - tall + ty) * width + x) * 4)
+    }
+  }
+}
+
+// The band as a picture for kitty and Ghostty, `width` pixels wide: the sky,
+// the minis, and Clawd in front, as the desktop draws them.
+export const picture = (w: Walker | null, width: number, minis: Walker[] = []) => {
+  if (!skies.has(width)) skies.set(width, skyPixels(width))
+  const px = skies.get(width)!.slice()
+  for (const m of minis) paint(px, width, m, MINI_SCALE)
+  if (w) paint(px, width, w, 1)
+  return { rgba: px.toBase64(), width, height: BAND_ROWS }
+}
+
 // What the band last drew, for the timer's repaints between draws.
 let timer: Timer | undefined
 let tick = 0
 let band: { id: string; surface: string; columns: number; minis: number; hasLeader: boolean } | undefined
 let walker = startWalker()
 let followers: Walker[] = []
+// Whether the terminal shows pictures (kitty, Ghostty), read at session start.
+let hasPictures = false
 
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
     tick += 1
     if (!band) return
-    // The desktop app redraws the SVG; the terminal repaints its cells in
-    // place. A frame that cannot be painted is skipped and the next one tries.
-    if (band.surface === 'desktop') {
-      const width = viewWidth(band.columns)
+    // The desktop app redraws the SVG; the terminal swaps its picture or
+    // repaints its cells in place. A frame that cannot be painted is skipped
+    // and the next one tries.
+    if (band.surface === 'desktop' || hasPictures) {
+      const width = band.surface === 'desktop' ? viewWidth(band.columns) : pictureWidth(band.columns)
       if (band.hasLeader) walker = stepWalker(walker, width, tick)
       const count = Math.min(band.minis, MAX_MINIS)
       while (followers.length < count) followers.push(spawnMini(walker, followers.length))
       followers = followers.slice(0, count).map((m, i) => stepWalker(m, Math.floor(width / MINI_SCALE), tick + 7 * (i + 1)))
+    }
+    if (band.surface === 'desktop') {
       $.ui.invalidate('ui.render')
+    } else if (hasPictures) {
+      const source = picture(band.hasLeader ? walker : null, pictureWidth(band.columns), followers)
+      $.ui.blit({ requestId: band.id, key: KEY, source }).catch(() => {})
     } else {
       const cells = frame(Math.floor(tick / 2), band.columns, band.minis, band.hasLeader)
       $.ui.blit({ requestId: band.id, key: KEY, cells }).catch(() => {})
@@ -316,6 +382,8 @@ export const register: Register = on => {
   // A reload while anything works picks the animation back up.
   on('session.start', async ($, e, next) => {
     const r = await next(e)
+    const term = await $.env.get('TERM').catch(() => undefined)
+    hasPictures = /kitty|ghostty/.test(term ?? '')
     if ((await read($, working)) || (await read($, agents)).length > 0) start($)
     return r
   })
@@ -422,9 +490,13 @@ export const register: Register = on => {
     }
     if (e.surface !== 'terminal') return next(e)
     band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
+    const { Box, Image, Raster, Text } = $.ui.resolve(e)
+    if (hasPictures) {
+      const source = picture(hasLeader ? walker : null, pictureWidth(columns), followers.slice(0, minis))
+      return <Image key={KEY} source={source} columns={columns} rows={PICTURE_ROWS} alt="Clawd walking along the prompt" />
+    }
     const progress = checklist(await read($, tasks))
     const latest = (await read($, commands)).at(-1)
-    const { Box, Raster, Text } = $.ui.resolve(e)
     const task = progress && (
       <Text wrap="truncate">{progress.now ? `${progress.now}  ` : ''}<Text dimColor>{progress.count}</Text></Text>
     )

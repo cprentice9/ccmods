@@ -5,7 +5,7 @@ Mods for Claude Code. Each folder is one plugin of function hooks.
 | Mod | What it does |
 | --- | --- |
 | `prose-guard` | Turns each em dash in a reply into a comma as the reply streams. Refuses writes and shell commands that add an em dash, and prose or commit messages that use British spelling. |
-| `working-clawd` | While Claude works on a turn, Clawd shows up above the prompt. In the desktop app he walks the length of the prompt box against a starry sky and stops now and then to look around, wave, jump or turn back, as on the claude.dev blog, with a smaller Clawd walking beside him for each running subagent. In the terminal he walks back and forth, with a mini Clawd for each running subagent and the current task and latest command above him. |
+| `working-clawd` | While Claude works on a turn, Clawd shows up above the prompt. In the desktop app he walks the length of the prompt box against a starry sky and stops now and then to look around, wave, jump or turn back, as on the claude.dev blog, with a smaller Clawd walking beside him for each running subagent. Ghostty and kitty show the same scene as a picture. Other terminals draw him in half blocks walking back and forth, with a mini Clawd for each running subagent and the current task and latest command above him. |
 | `stuck-detector` | When the same test command fails twice in a row, shows a toast and tells the model to ask for a second opinion. |
 
 ## Loading a mod

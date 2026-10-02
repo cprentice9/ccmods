@@ -1,8 +1,8 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { checklist, describeCommand, frame, starfield, startWalker, stepWalker, walkerFrame, walkerSvg } from './register.tsx'
+import { checklist, describeCommand, frame, picture, starfield, startWalker, stepWalker, walkerFrame, walkerSvg } from './register.tsx'
 import type { Walker } from './register.tsx'
 
 const ORANGE = 0xd77757
@@ -51,8 +51,10 @@ const engine = (on: On) => {
   })
   // The engine's own band: an empty box.
   on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.blit', (_$, e) => {
-    blits.push((e as { cells: string }).cells)
+    const blit = e as { cells?: string; source?: { rgba: string } }
+    blits.push(blit.cells ?? blit.source!.rgba)
     return {}
   })
   on('clock.every', async (_$, e) => {
@@ -315,4 +317,59 @@ test('the sky is the same every frame and stays inside the band', () => {
     expect(Number(cx)).toBeLessThanOrEqual(300)
     expect(Number(cy)).toBeLessThanOrEqual(21)
   }
+})
+
+// The RGB of pixel (x, y) in a picture.
+const pixel = (p: { rgba: string; width: number }, x: number, y: number) => {
+  const bytes = Uint8Array.fromBase64(p.rgba)
+  const i = (y * p.width + x) * 4
+  return (bytes[i]! << 16) | (bytes[i + 1]! << 8) | bytes[i + 2]!
+}
+const CLAWD = 0xd97757
+
+test('the picture draws him on the sky as the desktop does, a pixel to a half pixel', () => {
+  const p = picture({ ...startWalker(), x: 10, clip: 'looking', at: 0 }, 50)
+  expect([p.width, p.height]).toEqual([50, 21])
+  expect(Uint8Array.fromBase64(p.rgba).length).toBe(50 * 21 * 4)
+  // The front frame's top row runs 16 half pixels from x 4, here 14, on row 5.
+  expect(pixel(p, 14, 5)).toBe(CLAWD)
+  expect(pixel(p, 13, 5)).not.toBe(CLAWD)
+  // His eyes are holes the sky shows through.
+  expect(pixel(p, 16, 7)).not.toBe(CLAWD)
+  expect(pixel(p, 18, 7)).toBe(CLAWD)
+})
+
+test('a mini in the picture is a quarter smaller and stands on the bottom edge', () => {
+  const p = picture(null, 100, [{ ...startWalker(), x: 40 }])
+  const columns = new Set<number>()
+  for (let y = 0; y < 21; y++) {
+    for (let x = 0; x < 100; x++) {
+      if (pixel(p, x, y) !== CLAWD) continue
+      columns.add(x)
+      // 16 of the 21 rows tall, so nothing above row 5.
+      expect(y).toBeGreaterThanOrEqual(5)
+    }
+  }
+  // 40 mini half pixels in is 30 pixels, and he is 18 wide.
+  expect(Math.min(...columns)).toBeGreaterThanOrEqual(30)
+  expect(Math.max(...columns)).toBeLessThan(48)
+})
+
+test('in Ghostty the band is the picture, swapped each tick', async ($, on) => {
+  const { blits, tick } = engine(on)
+  mock.env(on, { TERM: 'xterm-ghostty' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  const ui = await mount($, 'terminal')
+  const drawn = await ui.find({ type: 'Image' })
+  // 100 columns at 3.5 pixels each, over the band's 3 rows.
+  expect(drawn?.props).toMatchObject({ columns: 100, rows: 3 })
+  expect((drawn?.props.source as { width: number }).width).toBe(350)
+  expect(await ui.find({ type: 'Raster' })).toBeUndefined()
+  tick()
+  for (let i = 0; i < 50 && blits.length === 0; i++) await Promise.resolve()
+  expect(blits).toHaveLength(1)
+  expect(Uint8Array.fromBase64(blits[0]!).length).toBe(350 * 21 * 4)
+  await ui.unmount()
+  await complete($, 't1')
 })
