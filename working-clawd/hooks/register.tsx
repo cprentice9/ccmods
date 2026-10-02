@@ -248,7 +248,6 @@ export const starfield = (width: number) => {
   return dots.join('')
 }
 let sky: string | undefined
-const SPACER = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${BAND_HEIGHT}"/>`
 
 // One walker at `scale`, `at` of the way along whatever width the app gives
 // the band: a percentage, less that share of his own width, so he spans it
@@ -406,19 +405,17 @@ export const register: Register = on => {
     if (e.surface === 'desktop') {
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
       const { Box, Svg } = $.ui.resolve(e)
-      // The app paints a placed Box over everything before it. So an empty
-      // SVG holds the band's height, the sky color runs past the band's
-      // edges to cover its padding, and the walkers are placed over that.
+      const source = walkerSvg(hasLeader ? walker : null, viewWidth(columns), followers.slice(0, minis))
+      const drawing = <Svg source={source} height={BAND_HEIGHT} alt="Clawd walking along the prompt box" />
+      // The app paints a placed Box over everything before it. So one copy
+      // of the drawing holds the band's height, the sky color runs past the
+      // band's edges to cover its padding, and a second copy goes on top.
       return (
         <Box position="relative" flexDirection="column">
-          <Svg source={SPACER} height={BAND_HEIGHT} alt="" />
+          {drawing}
           <Box position="absolute" top={-2} left={-2} right={-2} bottom={-2} backgroundColor={SKY} />
-          <Box position="absolute" top={0} left={0} right={0} flexDirection="column">
-            <Svg
-              source={walkerSvg(hasLeader ? walker : null, viewWidth(columns), followers.slice(0, minis))}
-              height={BAND_HEIGHT}
-              alt="Clawd walking along the prompt box"
-            />
+          <Box position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column">
+            {drawing}
           </Box>
         </Box>
       )
