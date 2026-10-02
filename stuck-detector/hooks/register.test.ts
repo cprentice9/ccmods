@@ -10,9 +10,10 @@ const setup = (on: On, failing: Set<string>) => {
   const toasts: string[] = []
   on('ui.toast', (_$, e) => {
     toasts.push(e.text)
+    return { value: undefined }
   })
   on('tool.call', { tool: 'Bash' }, (_$, e) =>
-    failing.has(e.command)
+    failing.has(String(e.command))
       ? { isError: true, result: 'Exit code 1', text: `Exit code 1\nFAILED ${e.command}` }
       : { result: { stdout: 'ok', stderr: '', interrupted: false }, text: 'ok' },
   )

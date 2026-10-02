@@ -44,7 +44,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    const command = e.command.trim().replace(/\s+/g, ' ')
+    const command = String(e.command).trim().replace(/\s+/g, ' ')
     if (ran.deny !== undefined || !TEST_PATTERN.test(command)) return ran
 
     const key = `${e.agentId ?? 'main'}\n${command}`

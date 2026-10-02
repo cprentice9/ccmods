@@ -1,9 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, RenderElement } from 'claude-code'
 
-import { checklist, describeCommand, frame, picture, starfield, startWalker, stepWalker, walkerFrame, walkerSvg } from './register.tsx'
-import type { Walker } from './register.tsx'
+import { checklist, describeCommand, frame, picture, starfield, startWalker, stepWalker, walkerFrame, walkerSvg } from './register'
+import type { Walker } from './register'
 
 const ORANGE = 0xd77757
 const DEFAULT = 0x01000000
@@ -50,12 +50,12 @@ const engine = (on: On) => {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: null, usage: null }
   })
   // The engine's own band: an empty box.
-  on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}))
+  on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}) as RenderElement)
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.blit', (_$, e) => {
     const blit = e as { cells?: string; source?: { png: string } }
     blits.push(blit.cells ?? blit.source!.png)
-    return {}
+    return { value: {} }
   })
   on('clock.every', async (_$, e) => {
     periods.push(e.ms)
@@ -136,7 +136,16 @@ test('the minis hop in step with him, and walk on their own when he is idle', ()
 
 test('the band shows a mini while a subagent runs, and again when it resumes', async ($, on) => {
   engine(on)
-  await $.agent.spawn({ prompt: 'Go.', description: 'task', subagentType: 'helper' })
+  await $.agent.spawn({
+    tool_use_id: 't1',
+    prompt: 'Go.',
+    description: 'task',
+    subagentType: 'helper',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5',
+    background: false,
+    fork: false,
+  })
   let ui = await mount($, 'terminal')
   expect(await ui.find({ type: 'Raster' })).toBeDefined()
   await ui.unmount()

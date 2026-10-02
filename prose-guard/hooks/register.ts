@@ -53,7 +53,7 @@ for (const [uk, us] of [
   ['tyre', 'tire'], ['tyres', 'tires'],
   ['manoeuvre', 'maneuver'], ['manoeuvres', 'maneuvers'], ['manoeuvred', 'maneuvered'], ['manoeuvring', 'maneuvering'],
   ['sceptic', 'skeptic'], ['sceptics', 'skeptics'], ['sceptical', 'skeptical'], ['scepticism', 'skepticism'],
-])
+] as [string, string][])
   add(uk, us)
 
 const britishCounts = (s: unknown) => {
