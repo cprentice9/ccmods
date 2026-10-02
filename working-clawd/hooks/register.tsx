@@ -20,9 +20,8 @@ const ROWS = HEIGHT / 2
 // The clips' own rate, 12 frames a second; the terminal walker steps every
 // other frame.
 const TICK_MS = 83
-// The desktop band, in CSS pixels: a half pixel of Clawd, and one of the
-// band's columns as measured from a screenshot, to know how far he can walk.
-// Too wide a guess and the app shrinks the whole drawing to fit.
+// The desktop band, in CSS pixels: a half pixel of Clawd, and a rough width
+// of one of the band's columns, which sets how fast he crosses it.
 const HALF = 2.5
 const COLUMN = 6
 // The band shows the clips from this row down: the top of his raised arm in
@@ -34,6 +33,8 @@ const MINI_SCALE = 0.75
 const SKY = '#151515'
 const STAR = '#8c8c8c'
 const GRID = 2.4
+// Half pixels of sky drawn, wider than any window; the app cuts it to the band.
+const SKY_WIDTH = 1000
 const BAND_HEIGHT = (CLIP_HEIGHT - TOP) * HALF
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
@@ -189,7 +190,7 @@ export const walkerFrame = (w: Walker) => {
   return w.dir < 0 ? rows.map(row => [...row].reverse().join('')) : rows
 }
 
-// Clawd's rects where he stands: each row's runs of one color, his eyes left
+// Clawd's rects, from his left edge: each row's runs of one color, his eyes left
 // as holes. Rows above TOP are cut, so a frame that reaches higher (the jump)
 // is moved down to fit.
 const walkerRects = (w: Walker) => {
@@ -203,7 +204,7 @@ const walkerRects = (w: Walker) => {
       if (!fill) continue
       let end = x
       while (row[end + 1] === row[x]) end++
-      rects.push(`<rect x="${w.x + x}" y="${y}" width="${end - x + 1}" height="1" fill="${fill}"/>`)
+      rects.push(`<rect x="${x}" y="${y}" width="${end - x + 1}" height="1" fill="${fill}"/>`)
       x = end
     }
   })
@@ -221,11 +222,11 @@ const hash = (n: number) => {
 }
 const round = (n: number) => Math.round(n * 10) / 10
 
-// The sky behind him, `width` half pixels wide: a dark field, single stars,
-// and clusters of dots on a grid that thin out toward their edges.
+// The stars behind him, `width` half pixels wide: single stars, and clusters
+// of dots on a grid that thin out toward their edges.
 export const starfield = (width: number) => {
   const height = CLIP_HEIGHT - TOP
-  const dots = [`<rect width="${width}" height="${height}" fill="${SKY}"/>`]
+  const dots: string[] = []
   for (let i = 0; i < width / 5; i++) {
     const r = round(0.3 + 0.3 * hash(i * 3 + 2))
     const opacity = round(0.3 + 0.5 * hash(i * 3 + 3))
@@ -246,16 +247,28 @@ export const starfield = (width: number) => {
   }
   return dots.join('')
 }
-const skies = new Map<number, string>()
+let sky: string | undefined
 
-// The band as SVG markup, `width` half pixels wide: the sky, the minis a
-// quarter smaller standing on the same line, and Clawd in front.
+// One walker at `scale`, `at` of the way along whatever width the app gives
+// the band: a percentage, less that share of his own width, so he spans it
+// end to end without knowing its pixels.
+const placed = (w: Walker, at: number, scale: number) => {
+  const size = HALF * scale
+  return `<svg x="${round(at * 100)}%" overflow="visible">`
+    + `<g transform="translate(${round(-at * CLIP_WIDTH * size)} ${BAND_HEIGHT * (1 - scale)}) scale(${size})">${walkerRects(w)}</g></svg>`
+}
+
+// The band as SVG markup in CSS pixels, as wide as the app makes it: the sky,
+// the minis a quarter smaller standing on the same line, and Clawd in front.
+// `width` is the walk's length in half pixels, a guess from the columns, so
+// a wrong guess changes only how fast they cross.
 export const walkerSvg = (w: Walker | null, width: number, minis: Walker[] = []) => {
-  const height = CLIP_HEIGHT - TOP
-  if (!skies.has(width)) skies.set(width, starfield(width))
-  const small = minis.map(m => `<g transform="translate(0 ${height * (1 - MINI_SCALE)}) scale(${MINI_SCALE})">${walkerRects(m)}</g>`)
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width * HALF}" height="${BAND_HEIGHT}" viewBox="0 0 ${width} ${height}">`
-    + `${skies.get(width)}<g shape-rendering="crispEdges">${small.join('')}${w ? walkerRects(w) : ''}</g></svg>`
+  sky ??= starfield(SKY_WIDTH)
+  const along = (m: Walker, scale: number) => m.x / Math.max(1, Math.floor(width / scale) - CLIP_WIDTH)
+  const small = minis.map(m => placed(m, along(m, MINI_SCALE), MINI_SCALE))
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${BAND_HEIGHT}">`
+    + `<rect width="100%" height="100%" fill="${SKY}"/><g transform="scale(${HALF})">${sky}</g>`
+    + `<g shape-rendering="crispEdges">${small.join('')}${w ? placed(w, along(w, 1), 1) : ''}</g></svg>`
 }
 
 // A new mini hops out of Clawd and heads off the other way.
@@ -391,14 +404,20 @@ export const register: Register = on => {
     if (isIdle || e.props.hasSurvey || columns < MIN_COLUMNS) return next(e)
     if (e.surface === 'desktop') {
       band = { id: e.requestId, surface: e.surface, columns, minis, hasLeader }
-      const { Svg } = $.ui.resolve(e)
+      const { Box, Svg } = $.ui.resolve(e)
+      // The sky color runs past the band's edges, cut off where the band
+      // ends, so it covers the app's padding; the SVG stretches to the width.
       return (
-        <Svg
-          source={walkerSvg(hasLeader ? walker : null, viewWidth(columns), followers.slice(0, minis))}
-          width={columns * COLUMN}
-          height={BAND_HEIGHT}
-          alt="Clawd walking along the prompt box"
-        />
+        <Box position="relative" flexDirection="column">
+          <Box position="absolute" top={-2} left={-2} right={-2} bottom={-2} backgroundColor={SKY} />
+          <Box position="relative" flexDirection="column">
+            <Svg
+              source={walkerSvg(hasLeader ? walker : null, viewWidth(columns), followers.slice(0, minis))}
+              height={BAND_HEIGHT}
+              alt="Clawd walking along the prompt box"
+            />
+          </Box>
+        </Box>
       )
     }
     if (e.surface !== 'terminal') return next(e)

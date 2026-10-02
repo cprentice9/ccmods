@@ -190,7 +190,8 @@ test('the desktop app draws him walking as an SVG; a narrow terminal and the edi
   const desktop = await mount($, 'desktop')
   const drawn = await desktop.find({ type: 'Svg' })
   // 100 columns of about 6 CSS pixels is 240 half pixels of 2.5 to walk.
-  expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 240), width: 600, height: 52.5 })
+  expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 240), height: 52.5 })
+  expect(drawn?.props.width).toBeUndefined()
   expect(await desktop.find({ type: 'Text' })).toBeUndefined()
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
@@ -285,23 +286,25 @@ test('after a stretch of walking he stops to look, wave, jump or turn, then walk
 test('the SVG draws his frame where he stands, his eyes left as holes', () => {
   const w: Walker = { ...startWalker(), x: 7, clip: 'looking', at: 0 }
   const source = walkerSvg(w, 100)
-  expect(source).toContain('width="250" height="52.5" viewBox="0 0 100 21"')
-  // The front frame: his body's top row runs 16 half pixels from x 4, here 11.
-  expect(source).toContain('<rect x="11" y="5" width="16" height="1" fill="#d97757"/>')
+  expect(source).toContain('width="100%" height="52.5"')
+  // 7 of the 76 half pixels he can walk is 9.2% along, less 9.2% of his width.
+  expect(source).toContain('<svg x="9.2%" overflow="visible"><g transform="translate(-5.5 0) scale(2.5)">')
+  // The front frame: his body's top row runs 16 half pixels from x 4.
+  expect(source).toContain('<rect x="4" y="5" width="16" height="1" fill="#d97757"/>')
   // Its eye row: body, two eye cells left empty, body again.
-  expect(source).toContain('<rect x="11" y="7" width="2" height="1" fill="#d97757"/>')
-  expect(source).toContain('<rect x="15" y="7" width="8" height="1" fill="#d97757"/>')
+  expect(source).toContain('<rect x="4" y="7" width="2" height="1" fill="#d97757"/>')
+  expect(source).toContain('<rect x="8" y="7" width="8" height="1" fill="#d97757"/>')
   expect(source).not.toContain('fill="#141413"')
 })
 
 test('minis stand a quarter smaller on the same line, behind Clawd, under the sky', () => {
   const mini: Walker = { ...startWalker(), x: 40 }
   const source = walkerSvg(startWalker(), 100, [mini])
-  expect(source.indexOf('fill="#151515"')).toBeLessThan(source.indexOf('scale(0.75)'))
-  expect(source).toContain('<g transform="translate(0 5.25) scale(0.75)"><rect x="51"')
-  expect(source.indexOf('scale(0.75)')).toBeLessThan(source.lastIndexOf('<rect x="11"'))
+  expect(source.indexOf('fill="#151515"')).toBeLessThan(source.indexOf('scale(1.875)'))
+  expect(source).toContain('<svg x="36.7%" overflow="visible"><g transform="translate(-16.5 13.125) scale(1.875)">')
+  expect(source.indexOf('scale(1.875)')).toBeLessThan(source.lastIndexOf('scale(2.5)'))
   // With no main turn, only the minis walk.
-  expect(walkerSvg(null, 100, [mini]).match(/<g transform/g)).toHaveLength(1)
+  expect(walkerSvg(null, 100, [mini]).match(/overflow="visible"/g)).toHaveLength(1)
 })
 
 test('the sky is the same every frame and stays inside the band', () => {
