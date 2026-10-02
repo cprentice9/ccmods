@@ -190,7 +190,7 @@ test('the desktop app draws him walking as an SVG; a narrow terminal and the edi
   const desktop = await mount($, 'desktop')
   const drawn = await desktop.find({ type: 'Svg' })
   // 100 columns of about 6 CSS pixels is 240 half pixels of 2.5 to walk.
-  expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 240), width: 600, height: 75 })
+  expect(drawn?.props).toMatchObject({ source: walkerSvg(startWalker(), 240), width: 600, height: 52.5 })
   expect(await desktop.find({ type: 'Text' })).toBeUndefined()
   await desktop.unmount()
   for (const ui of [await mount($, 'terminal', 20), await mount($, 'vscode')]) {
@@ -285,11 +285,11 @@ test('after a stretch of walking he stops to look, wave, jump or turn, then walk
 test('the SVG draws his frame where he stands, his eyes left as holes', () => {
   const w: Walker = { ...startWalker(), x: 7, clip: 'looking', at: 0 }
   const source = walkerSvg(w, 100)
-  expect(source).toContain('width="250" height="75" viewBox="0 0 100 30"')
+  expect(source).toContain('width="250" height="52.5" viewBox="0 0 100 21"')
   // The front frame: his body's top row runs 16 half pixels from x 4, here 11.
-  expect(source).toContain('<rect x="11" y="14" width="16" height="1" fill="#d97757"/>')
+  expect(source).toContain('<rect x="11" y="5" width="16" height="1" fill="#d97757"/>')
   // Its eye row: body, two eye cells left empty, body again.
-  expect(source).toContain('<rect x="11" y="16" width="2" height="1" fill="#d97757"/>')
-  expect(source).toContain('<rect x="15" y="16" width="8" height="1" fill="#d97757"/>')
+  expect(source).toContain('<rect x="11" y="7" width="2" height="1" fill="#d97757"/>')
+  expect(source).toContain('<rect x="15" y="7" width="8" height="1" fill="#d97757"/>')
   expect(source).not.toContain('fill="#141413"')
 })

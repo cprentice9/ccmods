@@ -25,6 +25,10 @@ const TICK_MS = 83
 // Too wide a guess and the app shrinks the whole drawing to fit.
 const HALF = 2.5
 const COLUMN = 6
+// The band shows the clips from this row down: the top of his raised arm in
+// the wave. The jump rises higher, so it hops only as high as the wave.
+const TOP = 9
+const BAND_HEIGHT = (CLIP_HEIGHT - TOP) * HALF
 const working = atom({ plugin: 'working-clawd', key: 'turnId' } as const, null as WorkingTurn)
 const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as string[])
 const tasks = atom({ plugin: 'working-clawd', key: 'tasks' } as const, {} as WorkingTasks)
@@ -183,7 +187,10 @@ export const walkerFrame = (w: Walker) => {
 // color as rectangles, his eyes left as holes.
 export const walkerSvg = (w: Walker, width: number) => {
   const rects: string[] = []
-  walkerFrame(w).forEach((row, y) => {
+  const rows = walkerFrame(w)
+  const shift = Math.max(0, TOP - rows.findIndex(row => /[^.]/.test(row))) - TOP
+  rows.forEach((row, at) => {
+    const y = at + shift
     for (let x = 0; x < row.length; x++) {
       const fill = COLORS[row[x]!]
       if (!fill) continue
@@ -193,8 +200,8 @@ export const walkerSvg = (w: Walker, width: number) => {
       x = end
     }
   })
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width * HALF}" height="${CLIP_HEIGHT * HALF}" `
-    + `viewBox="0 0 ${width} ${CLIP_HEIGHT}" shape-rendering="crispEdges">${rects.join('')}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width * HALF}" height="${BAND_HEIGHT}" `
+    + `viewBox="0 0 ${width} ${CLIP_HEIGHT - TOP}" shape-rendering="crispEdges">${rects.join('')}</svg>`
 }
 
 // What the band last drew, for the timer's repaints between draws.
@@ -322,7 +329,7 @@ export const register: Register = on => {
         <Svg
           source={walkerSvg(walker, viewWidth(columns))}
           width={columns * COLUMN}
-          height={CLIP_HEIGHT * HALF}
+          height={BAND_HEIGHT}
           alt="Clawd walking along the prompt box"
         />
       )
