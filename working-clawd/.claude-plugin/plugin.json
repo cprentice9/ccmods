@@ -1,6 +1,6 @@
 {
   "name": "working-clawd",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "While Claude works, Clawd walks above the prompt: across a starry sky in the desktop app, Ghostty and kitty, stopping to look around, wave and jump, and back and forth in half blocks in other terminals.",
   "author": {
     "name": "cprentice9"

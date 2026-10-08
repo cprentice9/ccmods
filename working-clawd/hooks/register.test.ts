@@ -160,6 +160,48 @@ test('the band shows a mini while a subagent runs, and again when it resumes', a
   await complete($, 't-a1', 'a1')
 })
 
+test('a mini whose turn.complete never came goes once the engine lists its agent as ended', async ($, on) => {
+  // A clock that runs as many ticks as the test allows, then waits.
+  let ticks = 0
+  let resume = () => {}
+  on('clock.now', () => ({ value: 0 }))
+  on('clock.every', async () => {
+    while (ticks === 0) await new Promise<void>(resolve => (resume = resolve))
+    ticks -= 1
+    return { value: undefined }
+  })
+  on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}) as RenderElement)
+  on('tool.call', () => ({ result: {}, text: 'ok' }))
+  const status: Record<string, string> = { a1: 'running', a2: 'running' }
+  on('agent.list', () =>
+    ({ value: Object.entries(status).map(([id, s]) => ({ id, status: s, description: 'task', type: 'helper' })) }) as never)
+  // The minis the desktop band draws, at three quarters of a half pixel each.
+  const minis = async () => {
+    const ui = await mount($, 'desktop')
+    const source = (await ui.findAll({ type: 'Svg' }))[1]?.props.source as string | undefined
+    await ui.unmount()
+    return source ? source.split('scale(1.875)').length - 1 : 0
+  }
+  // Two seconds of ticks, and the band as it stands once it shows `n` minis
+  // or the ticks run out.
+  const after2s = async (n: number) => {
+    ticks = 24
+    resume()
+    let count = await minis()
+    for (let i = 0; i < 5000 && count !== n; i++) count = await minis()
+    return count
+  }
+
+  for (const agentId of ['a1', 'a2']) await $.tool.call({ tool: 'Read', file_path: '/a', agentId } as never)
+  expect(await minis()).toBe(2)
+
+  status.a1 = 'completed'
+  expect(await after2s(1)).toBe(1)
+
+  status.a2 = 'killed'
+  expect(await after2s(0)).toBe(0)
+})
+
 test('the band shows Clawd only while a main turn runs', async ($, on) => {
   engine(on)
   let ui = await mount($, 'terminal')

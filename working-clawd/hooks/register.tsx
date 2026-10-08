@@ -49,6 +49,9 @@ const agents = atom({ plugin: 'working-clawd', key: 'agents' } as const, [] as s
 const tasks = atom({ plugin: 'working-clawd', key: 'tasks' } as const, {} as WorkingTasks)
 const commands = atom({ plugin: 'working-clawd', key: 'commands' } as const, [] as string[])
 const MAX_COMMANDS = 8
+// Every 2 seconds the minis are checked against the engine's agent list.
+const PRUNE_TICKS = 24
+const ENDED = ['completed', 'failed', 'killed']
 
 const CLEAR = -1
 const DEFAULT = 0x01000000
@@ -468,6 +471,7 @@ const desktopBand = (columns: number, hasLeader: boolean, now: number) => {
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
     tick += 1
+    if (tick % PRUNE_TICKS === 0) prune($).catch(() => {})
     // The desktop's walkers animate themselves. The terminal swaps its
     // picture or repaints its cells in place. A frame that cannot be painted
     // is skipped and the next one tries.
@@ -490,6 +494,25 @@ function start($: EngineInterface) {
 function stop() {
   timer?.cancel()
   timer = undefined
+}
+
+// With nothing left working, the band goes and the animation stops.
+async function settle($: EngineInterface) {
+  if (!(await read($, working)) && (await read($, agents)).length === 0) {
+    stop()
+    idleAt = await $.clock.now()
+  }
+  $.ui.invalidate('ui.render')
+}
+
+// Drops the subagents the engine lists as ended. Their turn.complete can go
+// missing, or a late tool call can add one back after it, and its mini would
+// walk forever. A workflow's agents are not listed, so they stay.
+async function prune($: EngineInterface) {
+  const ended = new Set((await $.agent.list()).filter(a => ENDED.includes(a.status)).map(a => a.id))
+  if (!(await read($, agents)).some(id => ended.has(id))) return
+  await update($, agents, a => a.filter(id => !ended.has(id)))
+  await settle($)
 }
 
 export const register: Register = on => {
@@ -575,11 +598,7 @@ export const register: Register = on => {
     } else if (e.turnId === (await read($, working))) {
       await update($, working, () => null)
     }
-    if (!(await read($, working)) && (await read($, agents)).length === 0) {
-      stop()
-      idleAt = await $.clock.now()
-    }
-    $.ui.invalidate('ui.render')
+    await settle($)
     return next(e)
   })
 
