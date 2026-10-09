@@ -15,7 +15,7 @@ A pass resets the count. The main session and each subagent keep separate counts
 
 ## The note
 
-The note is the `note` option in `.claude-plugin/plugin.json`. The default asks Claude to brief the `second-opinion` and `second-opinion-sonnet` agents, which are custom agent types. If you don't have agents with those names, change the default to whatever you want Claude to do.
+The note is the `note` option in `.claude-plugin/plugin.json`. The default asks Claude to brief the `second-opinion`, `second-opinion-sonnet` and `second-opinion-haiku` agents side by side, which are custom agent types running Fable 5.1, Sonnet 5.5 and Haiku 5.5 at high effort, the same as the pre-PR reviewers. If you don't have agents with those names, change the default to whatever you want Claude to do.
 
 ## Loading it
 

@@ -10,7 +10,7 @@
       "type": "string",
       "title": "Note to the model",
       "description": "Added to the result of a test command that has failed twice in a row.",
-      "default": "This test command has failed twice in a row. Stop fixing and ask for a second opinion: brief the second-opinion and second-opinion-sonnet agents with the symptom, what you tried, what each attempt showed, and the files to read first."
+      "default": "This test command has failed twice in a row. Stop fixing and ask for a second opinion from three subagents side by side on the same brief, with the same models and effort as the pre-PR review: second-opinion on Fable 5.1, second-opinion-sonnet on Sonnet 5.5 and second-opinion-haiku on Haiku 5.5, all at high effort. Brief them with the symptom, what you tried, what each attempt showed, and the files to read first."
     }
   }
 }
