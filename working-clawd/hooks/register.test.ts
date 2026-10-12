@@ -41,8 +41,11 @@ const engine = (on: On) => {
   const periods: number[] = []
   const blits: string[] = []
   const clock = { now: 0 }
+  const status: Record<string, string> = {}
   let release = () => {}
   on('clock.now', () => ({ value: clock.now }))
+  on('agent.list', () =>
+    ({ value: Object.entries(status).map(([id, s]) => ({ id, status: s, description: 'task', type: 'helper' })) }) as never)
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
@@ -60,7 +63,7 @@ const engine = (on: On) => {
     await new Promise<void>(resolve => (release = resolve))
     return { value: undefined }
   })
-  return { periods, blits, clock, tick: () => release() }
+  return { periods, blits, clock, status, tick: () => release() }
 }
 
 const mount = ($: Engine, surface: 'terminal' | 'desktop' | 'vscode', bodyColumns = 100) =>
@@ -132,7 +135,7 @@ test('the minis hop in step with him, and walk on their own when he is idle', ()
 })
 
 test('the band shows a mini while a subagent runs, and again when it resumes', async ($, on) => {
-  engine(on)
+  const { status } = engine(on)
   on('tool.call', () => ({ result: {}, text: 'ok' }))
   await $.agent.spawn({
     tool_use_id: 't1',
@@ -153,6 +156,15 @@ test('the band shows a mini while a subagent runs, and again when it resumes', a
   expect(await ui.find({ type: 'Raster' })).toBeUndefined()
   await ui.unmount()
 
+  // A call can carry an id the engine lists as no working agent: no mini.
+  await $.tool.call({ tool: 'ReadNotifications', agentId: 'not-an-agent' } as never)
+  status.a1 = 'completed'
+  await $.tool.call({ tool: 'Read', file_path: '/a', agentId: 'a1' } as never)
+  ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Raster' })).toBeUndefined()
+  await ui.unmount()
+
+  status.a1 = 'running'
   await $.tool.call({ tool: 'Read', file_path: '/a', agentId: 'a1' } as never)
   ui = await mount($, 'terminal')
   expect(await ui.find({ type: 'Raster' })).toBeDefined()
@@ -160,7 +172,7 @@ test('the band shows a mini while a subagent runs, and again when it resumes', a
   await complete($, 't-a1', 'a1')
 })
 
-test('a mini whose turn.complete never came goes once the engine lists its agent as ended', async ($, on) => {
+test('the minis follow the agents the engine lists as working', async ($, on) => {
   // A clock that runs as many ticks as the test allows, then waits.
   let ticks = 0
   let resume = () => {}
@@ -195,10 +207,17 @@ test('a mini whose turn.complete never came goes once the engine lists its agent
   for (const agentId of ['a1', 'a2']) await $.tool.call({ tool: 'Read', file_path: '/a', agentId } as never)
   expect(await minis()).toBe(2)
 
+  // a1 ended with no turn.complete: its mini goes.
   status.a1 = 'completed'
   expect(await after2s(1)).toBe(1)
 
-  status.a2 = 'killed'
+  // a3 resumed without a tool call: it gets a mini.
+  status.a3 = 'running'
+  expect(await after2s(2)).toBe(2)
+
+  // An agent the list no longer has goes too.
+  delete status.a2
+  status.a3 = 'killed'
   expect(await after2s(0)).toBe(0)
 })
 

@@ -50,8 +50,8 @@ const tasks = atom({ plugin: 'working-clawd', key: 'tasks' } as const, {} as Wor
 const commands = atom({ plugin: 'working-clawd', key: 'commands' } as const, [] as string[])
 const MAX_COMMANDS = 8
 // Every 2 seconds the minis are checked against the engine's agent list.
-const PRUNE_TICKS = 24
-const ENDED = ['completed', 'failed', 'killed']
+const SYNC_TICKS = 24
+const LIVE = ['pending', 'running']
 
 const CLEAR = -1
 const DEFAULT = 0x01000000
@@ -471,7 +471,7 @@ const desktopBand = (columns: number, hasLeader: boolean, now: number) => {
 function start($: EngineInterface) {
   timer ??= $.clock.every(TICK_MS, () => {
     tick += 1
-    if (tick % PRUNE_TICKS === 0) prune($).catch(() => {})
+    if (tick % SYNC_TICKS === 0) sync($).catch(() => {})
     // The desktop's walkers animate themselves. The terminal swaps its
     // picture or repaints its cells in place. A frame that cannot be painted
     // is skipped and the next one tries.
@@ -505,13 +505,19 @@ async function settle($: EngineInterface) {
   $.ui.invalidate('ui.render')
 }
 
-// Drops the subagents the engine lists as ended. Their turn.complete can go
-// missing, or a late tool call can add one back after it, and its mini would
-// walk forever. A workflow's agents are not listed, so they stay.
-async function prune($: EngineInterface) {
-  const ended = new Set((await $.agent.list()).filter(a => ENDED.includes(a.status)).map(a => a.id))
-  if (!(await read($, agents)).some(id => ended.has(id))) return
-  await update($, agents, a => a.filter(id => !ended.has(id)))
+// The agents the engine lists as working now.
+const liveAgents = async ($: EngineInterface) =>
+  (await $.agent.list()).filter(a => LIVE.includes(a.status)).map(a => a.id)
+
+// Matches the minis to the agents the engine lists as working. One whose
+// turn.complete went missing goes, and so does an id no listed agent has (a
+// tool call can carry one). One that resumed without a tool call comes back.
+// A workflow's agents are not listed, so they get no minis.
+async function sync($: EngineInterface) {
+  const live = await liveAgents($)
+  const mine = await read($, agents)
+  if (mine.length === live.length && mine.every(id => live.includes(id))) return
+  await update($, agents, a => [...a.filter(id => live.includes(id)), ...live.filter(id => !a.includes(id))])
   await settle($)
 }
 
@@ -551,12 +557,13 @@ export const register: Register = on => {
 
   // The main loop's TaskCreate and TaskUpdate calls keep the checklist.
   // Its other calls feed the latest-command line as they start. A call from
-  // a subagent that already finished means it resumed. That check sits here,
+  // a subagent that already finished means it resumed, if the engine lists it
+  // as working: a call can carry an id no agent has. That check sits here,
   // not on turn.step, which would pass every streamed chunk through the mod.
   on('tool.call', async ($, e, next) => {
     const call = e as unknown as Record<string, any>
     const agentId = call.agentId as string | undefined
-    if (agentId && !(await read($, agents)).includes(agentId)) {
+    if (agentId && !(await read($, agents)).includes(agentId) && (await liveAgents($)).includes(agentId)) {
       await update($, agents, a => (a.includes(agentId) ? a : [...a, agentId]))
       start($)
       $.ui.invalidate('ui.render')
