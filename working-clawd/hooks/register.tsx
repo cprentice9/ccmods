@@ -505,16 +505,20 @@ async function settle($: EngineInterface) {
   $.ui.invalidate('ui.render')
 }
 
+// A workflow's agents, from their agent.spawn to their turn.complete. The
+// engine never lists them, so only their turn.complete ends their minis.
+const workflowAgents = new Set<string>()
+
 // The agents the engine lists as working now.
 const liveAgents = async ($: EngineInterface) =>
   (await $.agent.list()).filter(a => LIVE.includes(a.status)).map(a => a.id)
 
-// Matches the minis to the agents the engine lists as working. One whose
-// turn.complete went missing goes, and so does an id no listed agent has (a
-// tool call can carry one). One that resumed without a tool call comes back.
-// A workflow's agents are not listed, so they get no minis.
+// Matches the minis to the agents the engine lists as working, plus any
+// workflow agents. One whose turn.complete went missing goes, and so does an
+// id no listed agent has (a tool call can carry one). One that resumed without
+// a tool call comes back.
 async function sync($: EngineInterface) {
-  const live = await liveAgents($)
+  const live = [...(await liveAgents($)), ...workflowAgents]
   const mine = await read($, agents)
   if (mine.length === live.length && mine.every(id => live.includes(id))) return
   await update($, agents, a => [...a.filter(id => live.includes(id)), ...live.filter(id => !a.includes(id))])
@@ -548,6 +552,7 @@ export const register: Register = on => {
     const ran = await next(e)
     const { agentId } = ran
     if (agentId) {
+      if (e.workflow) workflowAgents.add(agentId)
       await update($, agents, a => (a.includes(agentId) ? a : [...a, agentId]))
       start($)
       $.ui.invalidate('ui.render')
@@ -601,6 +606,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const { agentId } = e
     if (agentId) {
+      workflowAgents.delete(agentId)
       await update($, agents, a => a.filter(id => id !== agentId))
     } else if (e.turnId === (await read($, working))) {
       await update($, working, () => null)

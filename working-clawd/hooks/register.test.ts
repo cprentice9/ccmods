@@ -184,6 +184,8 @@ test('the minis follow the agents the engine lists as working', async ($, on) =>
   })
   on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}) as RenderElement)
   on('tool.call', () => ({ result: {}, text: 'ok' }))
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'w1' }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
   const status: Record<string, string> = { a1: 'running', a2: 'running' }
   on('agent.list', () =>
     ({ value: Object.entries(status).map(([id, s]) => ({ id, status: s, description: 'task', type: 'helper' })) }) as never)
@@ -219,6 +221,26 @@ test('the minis follow the agents the engine lists as working', async ($, on) =>
   delete status.a2
   status.a3 = 'killed'
   expect(await after2s(0)).toBe(0)
+
+  // A workflow's agent is never listed: its mini stays until its turn.complete.
+  await $.agent.spawn({
+    tool_use_id: 't2',
+    prompt: 'Go.',
+    description: 'task',
+    subagentType: 'helper',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5',
+    background: true,
+    fork: false,
+    workflow: { runId: 'wf_1', agentIndex: 1 },
+  })
+  expect(await minis()).toBe(1)
+  ticks = 48
+  resume()
+  for (let i = 0; i < 5000 && ticks > 0; i++) await minis()
+  expect(await minis()).toBe(1)
+  await complete($, 't-w1', 'w1')
+  expect(await minis()).toBe(0)
 })
 
 test('the band shows Clawd only while a main turn runs', async ($, on) => {
