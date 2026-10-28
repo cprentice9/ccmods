@@ -411,7 +411,7 @@ test('the SVG draws his frame where he stands, his eyes left as holes, on its ow
   const source = bandSvg([{ walk: { intro: [], loop: [w] }, scale: 1, elapsed: 0 }], 100)
   expect(source).toContain('width="100%" height="52.5"')
   // The app's frame is white where the SVG is clear, so the sky comes along.
-  expect(source).toContain(`<rect width="100%" height="100%" fill="#151515"/>`)
+  expect(source).toContain(`<rect width="100%" height="100%" fill="#191919"/>`)
   expect(source).toContain(starfield(1000))
   // 7 of the 76 half pixels he can walk is 9.2% along, less 9.2% of his width.
   expect(source).toContain('values="9.2%"')

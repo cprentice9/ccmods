@@ -30,8 +30,10 @@ const COLUMN = 6
 const TOP = 9
 // The minis' size next to Clawd.
 const MINI_SCALE = 0.75
-// The sky's colors, from the claude.dev page, and its clusters' dot spacing.
-const SKY = '#151515'
+// The sky's colors and its clusters' dot spacing. The stars come from the
+// claude.dev page; the sky is the desktop app's dark background, so the band
+// has no edge.
+const SKY = '#191919'
 const STAR = '#8c8c8c'
 const GRID = 2.4
 // Half pixels of sky drawn, wider than any window; the app cuts it to the band.
