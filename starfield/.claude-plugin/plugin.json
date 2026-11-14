@@ -1,0 +1,9 @@
+{
+  "name": "starfield",
+  "version": "1.0.0",
+  "description": "A theme for the desktop app: the usual dark gray with the dotted night sky from the foot of claude.dev behind the conversation, with its crescent moon and ringed planet. While Claude works, Clawd the astronaut floats in it, with a mini astronaut for each running subagent.",
+  "author": {
+    "name": "cprentice9"
+  },
+  "types": "./types/index.d.ts"
+}
