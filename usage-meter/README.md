@@ -11,7 +11,11 @@ Each meter is centered in an equal share of the row's width, a quarter with four
 
 ## Where the numbers come from
 
-The limits come from the same usage endpoint Claude Code reads for `/usage`. The mod asks the engine to attach your login to that one request, so the mod never sees your token. It reads the endpoint when the session starts, when Claude Code notices a limit moved, and every five minutes, and never more than once in 30 seconds. The context figure comes from the engine after each turn.
+In a terminal session the limits come from the same usage endpoint Claude Code reads for `/usage`. The mod asks the engine to attach your login to that one request, so the mod never sees your token.
+
+The desktop app gives each session a login that can only call the model, and the endpoint refuses it. So in a desktop session the mod reads the limits from the desktop's own usage tool, `get_usage`, which reports the same windows as the app's usage card.
+
+Either way it reads them when the session starts, when Claude Code notices a limit moved, and every five minutes after that. Until the first reading arrives it tries once a minute, and it never asks twice in 30 seconds. The context figure comes from the engine after each turn.
 
 With an API key, Bedrock, Vertex or a gateway there are no plan limits, so the row shows the context alone.
 

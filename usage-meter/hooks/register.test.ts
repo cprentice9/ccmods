@@ -2,6 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, RenderElement, RenderSurface } from 'claude-code'
 
+const USAGE_TOOL = 'mcp__ccd_session_mgmt__get_usage'
+
 // The parts of the usage endpoint's answer the mod reads.
 const BODY = {
   limits: [
@@ -11,19 +13,36 @@ const BODY = {
   ],
 }
 
-// Stands in for the engine beneath the plugin.
-const engine = (on: On, response: { status: number; text: string }) => {
+// The parts of the desktop usage tool's answer the mod reads.
+const PLAN = {
+  plan: {
+    status: 'ok',
+    windows: [
+      { label: '5-hour limit', percentUsed: 57, resetsAt: '2026-11-15T03:30:00Z' },
+      { label: 'Weekly · all models', percentUsed: 29, resetsAt: '2026-11-18T18:00:00Z' },
+      { label: 'Weekly · Fable', percentUsed: 50, resetsAt: '2026-11-18T18:00:00Z' },
+    ],
+  },
+}
+
+// Stands in for the engine beneath the plugin: each fetch answers with the
+// next response, the last one repeating, and the desktop tool is listed only
+// when `hasTool` says so.
+const engine = (on: On, responses: { status: number; text: string }[], hasTool = false) => {
   const fetched: { url: string; auth?: string }[] = []
-  mock.clock(on, { now: 1_000_000 })
+  const clock = mock.clock(on, { now: 1_000_000 })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, tokens: 110_000, percent: 11 }, rateLimits: [] } }))
   on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }))
+  on('tool.list', () => ({ value: hasTool ? [{ name: USAGE_TOOL }] : [] }) as never)
+  on('tool.call', { tool: USAGE_TOOL }, () => ({ result: PLAN, text: JSON.stringify(PLAN) }) as never)
   on('http.fetch', (_$, e) => {
     fetched.push({ url: e.url, auth: e.init?.auth })
+    const response = responses[Math.min(fetched.length, responses.length) - 1]!
     return { value: { ...response, ok: response.status === 200, headers: {} } }
   })
   on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}) as RenderElement)
-  return fetched
+  return { fetched, clock }
 }
 
 const mount = ($: Engine, surface: RenderSurface) =>
@@ -35,8 +54,15 @@ const mount = ($: Engine, surface: RenderSurface) =>
     viewport: { columns: 160, rows: 40 },
   })
 
+const shows = async ($: Engine, words: string[]) => {
+  const ui = await mount($, 'desktop')
+  const found = await Promise.all(words.map(async w => (await ui.find({ type: 'Text', text: w }))?.text))
+  await ui.unmount()
+  return found
+}
+
 test('the band shows each limit and the context', async ($, on) => {
-  const fetched = engine(on, { status: 200, text: JSON.stringify(BODY) })
+  const { fetched } = engine(on, [{ status: 200, text: JSON.stringify(BODY) }])
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
   expect(fetched).toEqual([{ url: 'https://api.anthropic.com/api/oauth/usage', auth: 'h1' }])
@@ -56,12 +82,21 @@ test('the band shows each limit and the context', async ($, on) => {
   await terminal.unmount()
 })
 
-test('a refused fetch leaves the context alone in the band', async ($, on) => {
-  engine(on, { status: 401, text: '' })
+test('a desktop session reads the limits from the desktop usage tool', async ($, on) => {
+  const { fetched } = engine(on, [{ status: 403, text: '' }], true)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
-  const ui = await mount($, 'desktop')
-  expect((await ui.find({ type: 'Text', text: 'Context' }))?.text).toBe('Context')
-  expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeUndefined()
-  await ui.unmount()
+  expect(fetched).toEqual([])
+  expect(await shows($, ['5-hour', '57%', 'Weekly', '29%', 'Fable weekly', '50%'])).toEqual(['5-hour', '57%', 'Weekly', '29%', 'Fable weekly', '50%'])
+})
+
+test('a refused first fetch is tried again a minute later', async ($, on) => {
+  const { fetched, clock } = engine(on, [{ status: 401, text: '' }, { status: 200, text: JSON.stringify(BODY) }])
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  expect(await shows($, ['Context', '5-hour'])).toEqual(['Context', undefined])
+
+  await clock.advance(60_000)
+  expect(fetched.length).toBe(2)
+  expect(await shows($, ['5-hour', '45%'])).toEqual(['5-hour', '45%'])
 })

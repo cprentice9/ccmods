@@ -3,9 +3,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { UsageMeter } from '../types'
 
-// The endpoint Claude Code reads for /usage.
+// The endpoint Claude Code reads for /usage. The desktop gives its sessions a
+// login that can only call the model, so there its own usage tool answers.
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
-const POLL_MS = 5 * 60_000
+const USAGE_TOOL = 'mcp__ccd_session_mgmt__get_usage'
+// Tries every minute until a reading arrives, then keeps it five minutes or
+// until a limit moves, never asking twice in 30 seconds.
+const POLL_MS = 60_000
+const FRESH_MS = 5 * 60_000
 const MIN_GAP_MS = 30_000
 // The blue of the desktop app's own context meter.
 const BLUE = '#2f7cf6'
@@ -22,6 +27,13 @@ const label = (l: Limit) => {
   return l.kind === 'weekly_scoped' && model ? `${model} weekly` : null
 }
 
+// The desktop tool's labels: "5-hour limit", "Weekly · all models", "Weekly · Fable".
+const toolLabel = (text: string) => {
+  if (text.startsWith('5-hour')) return '5-hour'
+  const model = /^Weekly · (.+)$/.exec(text)?.[1]
+  return model === undefined ? null : model === 'all models' ? 'Weekly' : `${model} weekly`
+}
+
 // The app's meter: a gray rounded track with a blue fill inset by 2px that
 // starts as a dot.
 const pill = (percent: number) => {
@@ -29,23 +41,37 @@ const pill = (percent: number) => {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="10" viewBox="0 0 24 10"><rect width="24" height="10" rx="5" fill="#8e8e93" fill-opacity="0.3"/><rect x="2" y="2" width="${fill}" height="6" rx="3" fill="${BLUE}"/></svg>`
 }
 
-let lastFetch = 0
-let timer: Timer | undefined
-
-async function refresh($: EngineInterface) {
-  const now = await $.clock.now()
-  if (now - lastFetch < MIN_GAP_MS) return
-  lastFetch = now
+async function readMeters($: EngineInterface): Promise<UsageMeter[]> {
+  if ((await $.tool.list()).some(t => t.name === USAGE_TOOL)) {
+    const r = await $.tool.call({ tool: USAGE_TOOL })
+    const windows: { label: string; percentUsed: number }[] = (r.text ? JSON.parse(r.text).plan?.windows : undefined) ?? []
+    return windows.flatMap(w => {
+      const name = toolLabel(w.label)
+      return name ? [{ label: name, percent: w.percentUsed }] : []
+    })
+  }
   // The engine sets the login header itself; the token never reaches the mod.
   const auth = await $.session.authorize()
-  if (auth?.kind !== 'bearer') return
+  if (auth?.kind !== 'bearer') return []
   const r = await $.http.fetch(USAGE_URL, { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
-  if (!r.ok) return
-  const body = JSON.parse(r.text)
-  const next: UsageMeter[] = ((body.limits ?? []) as Limit[]).flatMap(l => {
+  if (!r.ok) return []
+  return ((JSON.parse(r.text).limits ?? []) as Limit[]).flatMap(l => {
     const name = label(l)
     return name ? [{ label: name, percent: l.percent }] : []
   })
+}
+
+let readAt = 0
+let triedAt = 0
+let timer: Timer | undefined
+
+async function refresh($: EngineInterface, isForced = false) {
+  const now = await $.clock.now()
+  if (now - triedAt < MIN_GAP_MS || (!isForced && now - readAt < FRESH_MS)) return
+  triedAt = now
+  const next = await readMeters($)
+  if (next.length === 0) return
+  readAt = now
   await update($, meters, () => next)
 }
 
@@ -64,7 +90,7 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     const percent = e.context.percent
     if (percent !== undefined) await update($, context, () => percent)
-    if (e.changed.includes('rateLimits')) await refresh($).catch(() => {})
+    if (e.changed.includes('rateLimits')) await refresh($, true).catch(() => {})
     return next(e)
   })
 
