@@ -25,14 +25,23 @@ const PLAN = {
   },
 }
 
+// What the engine's compaction leaves.
+const SUMMARY = { role: 'user' as const, text: 'Summary of the conversation so far.', toolUses: [] }
+
 // Stands in for the engine beneath the plugin: each fetch answers with the
 // next response, the last one repeating, and the desktop tool is listed only
-// when `hasTool` says so.
+// when `hasTool` says so. A test changes `context` to move the engine's figure;
+// /context's estimate is always 30,000 tokens.
 const engine = (on: On, responses: { status: number; text: string }[], hasTool = false) => {
   const fetched: { url: string; auth?: string }[] = []
+  const context: { window: number; tokens?: number; percent?: number } = { window: 1_000_000, tokens: 110_000, percent: 11 }
   const clock = mock.clock(on, { now: 1_000_000 })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, tokens: 110_000, percent: 11 }, rateLimits: [] } }))
+  on('session.compact', () => ({ messages: [SUMMARY] }))
+  on('session.usage', (_$, e) => {
+    const breakdown = e?.breakdown ? { breakdown: { totalTokens: 30_000 } as never } : {}
+    return { value: { startedAt: 0, context: { ...context, ...breakdown }, rateLimits: [] } }
+  })
   on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }))
   on('tool.list', () => ({ value: hasTool ? [{ name: USAGE_TOOL }] : [] }) as never)
   on('tool.call', { tool: USAGE_TOOL }, () => ({ result: PLAN, text: JSON.stringify(PLAN) }) as never)
@@ -42,7 +51,7 @@ const engine = (on: On, responses: { status: number; text: string }[], hasTool =
     return { value: { ...response, ok: response.status === 200, headers: {} } }
   })
   on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}) as RenderElement)
-  return { fetched, clock }
+  return { fetched, clock, context }
 }
 
 const mount = ($: Engine, surface: RenderSurface) =>
@@ -99,4 +108,20 @@ test('a refused first fetch is tried again a minute later', async ($, on) => {
   await clock.advance(60_000)
   expect(fetched.length).toBe(2)
   expect(await shows($, ['5-hour', '45%'])).toEqual(['5-hour', '45%'])
+})
+
+test('a compaction shows the new size before the next reply', async ($, on) => {
+  const { clock, context } = engine(on, [{ status: 200, text: JSON.stringify(BODY) }])
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] })
+
+  // Until the compacted transcript lands, the engine still has the old figure.
+  await clock.advance(250)
+  expect(await shows($, ['11%'])).toEqual(['11%'])
+
+  // Then it has none until the next reply, so the meter shows the estimate.
+  delete context.tokens
+  delete context.percent
+  await clock.advance(250)
+  expect(await shows($, ['Context', '3%'])).toEqual(['Context', '3%'])
 })

@@ -75,6 +75,25 @@ async function refresh($: EngineInterface, isForced = false) {
   await update($, meters, () => next)
 }
 
+// No measurement follows a compaction, and until the next reply the engine has
+// no figure for the new transcript. So watch for the new transcript to land
+// (the engine's figure moves, four looks a second for up to ten seconds), then
+// show the engine's figure or, when it has none, the estimate /context draws.
+function afterCompact($: EngineInterface, before: number | undefined) {
+  let tries = 0
+  const watch = $.clock.every(250, () => {
+    settle().catch(() => {})
+  })
+  async function settle() {
+    const { context: c } = await $.session.usage()
+    if (c.percent === before && ++tries < 40) return
+    watch.cancel()
+    const { breakdown } = c.percent === undefined ? (await $.session.usage({ breakdown: 'summary' })).context : c
+    const fill = c.percent ?? (breakdown && Math.round((breakdown.totalTokens / c.window) * 100))
+    if (fill !== undefined) await update($, context, () => fill)
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
@@ -92,6 +111,13 @@ export const register: Register = on => {
     if (percent !== undefined) await update($, context, () => percent)
     if (e.changed.includes('rateLimits')) await refresh($, true).catch(() => {})
     return next(e)
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const before = await $.session.usage().then(u => u.context.percent, () => undefined)
+    const r = await next(e)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined) afterCompact($, before)
+    return r
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
