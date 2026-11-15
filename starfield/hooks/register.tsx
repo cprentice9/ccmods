@@ -365,7 +365,10 @@ export const register: Register = on => {
     return { text: set.isDrawn ? 'Starfield is on.' : `Starfield is set, but nothing draws it: ${set.reason}` }
   })
 
+  // The theme is set again at each turn, so a session that lost it (a reload,
+  // another mod's theme) has it back at the next message.
   on('turn.start', async ($, e, next) => {
+    await $.theme.set(LOOK).catch(() => {})
     await update($, working, () => e.turnId)
     start($)
     await show($)
