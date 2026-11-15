@@ -1,0 +1,9 @@
+{
+  "name": "usage-meter",
+  "version": "0.1.0",
+  "description": "A row above the prompt with your 5-hour, weekly and Fable weekly plan limits and the session's context.",
+  "author": {
+    "name": "cprentice9"
+  },
+  "types": "./types/index.d.ts"
+}

@@ -8,6 +8,7 @@ Mods for Claude Code. Each folder is one plugin of function hooks.
 | `working-clawd` | While Claude works on a turn, Clawd shows up above the prompt. In the desktop app he walks the length of the prompt box against a starry sky and stops now and then to look around, wave, jump or turn back, as on the claude.dev blog, with a smaller Clawd walking beside him for each running subagent. Ghostty and kitty show the same scene as a picture. Other terminals draw him in half blocks walking back and forth, with a mini Clawd for each running subagent and the current task and latest command above him. |
 | `stuck-detector` | When the same test command fails twice in a row, shows a toast and tells the model to ask for a second opinion. |
 | `starfield` | A theme for the desktop app. The dotted night sky from the foot of claude.dev sits behind the conversation, with its crescent moon and ringed planet. While Claude works, Clawd the astronaut floats in it, with a smaller astronaut for each running subagent. `/starfield` puts the theme back after another mod's. |
+| `usage-meter` | A row above the prompt with your 5-hour, weekly and Fable weekly plan limits and the session's context, each with a small meter in the desktop app. |
 
 ## Installing working-clawd
 
