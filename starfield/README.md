@@ -29,6 +29,8 @@ Never put `shape-rendering="crispEdges"` in a theme's scene. With it on any elem
 
 The hook that draws the scene answers at once from values the module already holds, and sends the same markup until Clawd or a mini comes or goes. A new source reloads the scene's frame and restarts its motion.
 
+On every session switch the desktop app asks for the scene again and parses it several times before the stars show, so keep it small. Clawd's frames go out only while an astronaut is drawn, and each dot is a short relative move, which brings an idle scene from 76 KB to 29 KB. The app still shows its own gray for 50 to 300 ms after a switch while it waits for every mod's drawing, and no mod can change that.
+
 ## Where the art comes from
 
 The sky is a port of the star field at the foot of claude.dev, and Clawd's frames are sampled from the astronaut there. Both are Anthropic's.

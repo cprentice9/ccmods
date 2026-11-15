@@ -142,11 +142,14 @@ const MOMENTS = [0, 2]
 const size = (radius: number) => Math.round(radius * 20) / 10
 
 // Every dot of one size goes into one path as a zero-length line with round
-// caps, about ten characters a dot.
+// caps, each moved to from the one before, about seven characters a dot.
 const dots = () => {
-  const layers = [new Map<number, string>(), new Map<number, string>(), new Map<number, string>()]
+  type Run = { d: string; x: number; y: number }
+  const layers = [new Map<number, Run>(), new Map<number, Run>(), new Map<number, Run>()]
   const add = (layer: number, width: number, x: number, y: number) => {
-    if (width > 0) layers[layer]!.set(width, `${layers[layer]!.get(width) ?? ''}M${x} ${y}h0`)
+    if (width <= 0) return
+    const run = layers[layer]!.get(width)
+    layers[layer]!.set(width, { d: run ? `${run.d}m${x - run.x} ${y - run.y}h0` : `M${x} ${y}h0`, x, y })
   }
   for (let r = 0, y = ((HEIGHT % GRID) + GRID) / 2; y < HEIGHT; r++, y += GRID) {
     for (let c = 0, x = ((WIDTH % GRID) + GRID) / 2; x < WIDTH; c++, x += GRID) {
@@ -165,7 +168,7 @@ const dots = () => {
       }
     }
   }
-  const [still, first, second] = layers.map(layer => [...layer].map(([width, d]) => `<path d="${d}" stroke-width="${width}"/>`).join(''))
+  const [still, first, second] = layers.map(layer => [...layer].map(([width, { d }]) => `<path d="${d}" stroke-width="${width}"/>`).join(''))
   return `${still}<g class="first">${first}</g><g class="second">${second}</g>`
 }
 
@@ -232,14 +235,17 @@ const style = (elapsed: number) => {
 </style>`
 }
 
-// The sky, built once: the fill, the dots, and Clawd's frames for the
-// astronauts to use.
+// The sky, built once: the fill and the dots.
 let built: string | undefined
 const sky = () =>
   (built ??=
-    `<defs>${strip()}</defs>` +
     `<rect width="100%" height="100%" fill="${SKY}"/>` +
     `<g fill="none" stroke="${DOT}" stroke-linecap="round" opacity="${SKY_OPACITY}">${dots()}</g>`)
+// Clawd's frames, built once and sent only while an astronaut is out. On
+// every session switch the app parses the scene several times before the
+// stars show, and the frames were over half of an idle scene.
+let frames: string | undefined
+const strips = () => (frames ??= `<defs>${strip()}</defs>`)
 
 // One astronaut in its seat, `elapsed` milliseconds into the float, so a
 // redraw picks each one up where it was. Each seat is a while further in, so
@@ -265,12 +271,17 @@ const astronaut = (seat: number, elapsed: number) => {
 
 // The whole scene as one SVG: the sky, the minis in their seats, and Clawd
 // while the main turn runs.
-export const scene = (hasLeader = false, minis: number[] = [], elapsed = 0) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">` +
-  style(elapsed) +
-  sky() +
-  [...minis, ...(hasLeader ? [0] : [])].map(seat => astronaut(seat, elapsed)).join('') +
-  `</svg>`
+export const scene = (hasLeader = false, minis: number[] = [], elapsed = 0) => {
+  const seats = [...minis, ...(hasLeader ? [0] : [])]
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">` +
+    style(elapsed) +
+    (seats.length > 0 ? strips() : '') +
+    sky() +
+    seats.map(seat => astronaut(seat, elapsed)).join('') +
+    `</svg>`
+  )
+}
 
 // The app's own colors stay. Its panels sit over the sky as clear glass in the
 // sky's gray, so the dots stay sharp and dim behind the words.
