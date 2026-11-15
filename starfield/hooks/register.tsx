@@ -219,20 +219,24 @@ const WAVES = [
 ] as const
 
 // The clouds fade by CSS, with motion on unless the system asks for less, as
-// the app's own example scenes have it.
-const STYLE = `<style>
-.first{animation:fade 14s ease-in-out infinite alternate}
-.second{opacity:0;animation:fade 14s ease-in-out infinite alternate-reverse}
+// the app's own example scenes have it. A redraw starts the fade `elapsed`
+// milliseconds in, so the sky does not jump when Clawd comes or goes.
+const FADE_SECONDS = 14
+const style = (elapsed: number) => {
+  const delay = `animation-delay:-${Math.round((elapsed / 1000) % (2 * FADE_SECONDS) * 10) / 10}s`
+  return `<style>
+.first{animation:fade ${FADE_SECONDS}s ease-in-out infinite alternate;${delay}}
+.second{opacity:0;animation:fade ${FADE_SECONDS}s ease-in-out infinite alternate-reverse;${delay}}
 @keyframes fade{from{opacity:1}to{opacity:0}}
 @media (prefers-reduced-motion: reduce){*{animation:none!important}}
 </style>`
+}
 
 // The sky, built once: the fill, the dots, and Clawd's frames for the
 // astronauts to use.
 let built: string | undefined
 const sky = () =>
   (built ??=
-    STYLE +
     `<defs>${strip()}</defs>` +
     `<rect width="100%" height="100%" fill="${SKY}"/>` +
     `<g fill="none" stroke="${DOT}" stroke-linecap="round" opacity="${SKY_OPACITY}">${dots()}</g>`)
@@ -263,6 +267,7 @@ const astronaut = (seat: number, elapsed: number) => {
 // while the main turn runs.
 export const scene = (hasLeader = false, minis: number[] = [], elapsed = 0) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">` +
+  style(elapsed) +
   sky() +
   [...minis, ...(hasLeader ? [0] : [])].map(seat => astronaut(seat, elapsed)).join('') +
   `</svg>`
