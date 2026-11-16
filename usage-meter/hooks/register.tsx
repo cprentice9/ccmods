@@ -8,7 +8,7 @@ import type { UsageMeter } from '../types'
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 const USAGE_TOOL = 'mcp__ccd_session_mgmt__get_usage'
 // Tries every minute until a reading arrives, then keeps it five minutes or
-// until a limit moves, never asking twice in 30 seconds.
+// until a turn ends, never asking twice in 30 seconds.
 const POLL_MS = 60_000
 const FRESH_MS = 5 * 60_000
 const MIN_GAP_MS = 30_000
@@ -34,24 +34,26 @@ const toolLabel = (text: string) => {
   return model === undefined ? null : model === 'all models' ? 'Weekly' : `${model} weekly`
 }
 
-// The windows each model response reports in its headers, read as the
-// response lands. Other sessions use the same limits, so once this one has
-// been quiet a minute a fetch knows better.
+// The windows each model response reports in its headers. The API sends the
+// headers before the response, so they leave out what it cost and trail the
+// app's card. They only raise a meter mid-turn; the card's reading, fetched as
+// each turn ends, sets it.
 const KINDS: Record<string, string> = { five_hour: '5-hour', seven_day: 'Weekly' }
 
-const overlay = (rows: UsageMeter[] | null, limits: SessionUsage['rateLimits']) => {
-  const fresh = limits.flatMap(l => (KINDS[l.kind] ? [{ label: KINDS[l.kind]!, percent: l.percentUsed }] : []))
-  if (rows === null) return fresh.length ? fresh : null
-  return rows.map(r => fresh.find(f => f.label === r.label) ?? r)
+const raise = (rows: UsageMeter[] | null, limits: SessionUsage['rateLimits']) => {
+  const heard = limits.flatMap(l => (KINDS[l.kind] ? [{ label: KINDS[l.kind]!, percent: l.percentUsed }] : []))
+  if (rows === null) return heard.length ? heard : null
+  return rows.map(r => {
+    const h = heard.find(f => f.label === r.label)
+    return h && h.percent > r.percent ? h : r
+  })
 }
 
-// Shows the engine's figures as they stand.
-async function show($: EngineInterface, u: Pick<SessionUsage, 'context' | 'rateLimits'>) {
+// Shows the engine's figures as they stand. Context is the main thread's.
+async function show($: EngineInterface, u: Pick<SessionUsage, 'context' | 'rateLimits'>, isMain: boolean) {
   const percent = u.context.percent
-  if (percent !== undefined) await update($, context, () => percent)
-  if (!u.rateLimits.length) return
-  heardAt = await $.clock.now()
-  await update($, meters, m => overlay(m, u.rateLimits))
+  if (isMain && percent !== undefined) await update($, context, () => percent)
+  if (u.rateLimits.length) await update($, meters, m => raise(m, u.rateLimits))
 }
 
 // The app's meter: a gray rounded track with a blue fill inset by 2px that
@@ -83,18 +85,27 @@ async function readMeters($: EngineInterface): Promise<UsageMeter[]> {
 
 let readAt = 0
 let triedAt = 0
-let heardAt = 0
 let timer: Timer | undefined
+let retry: Timer | undefined
 
 async function refresh($: EngineInterface, isForced = false) {
   const now = await $.clock.now()
-  if (now - triedAt < MIN_GAP_MS || (!isForced && now - readAt < FRESH_MS)) return
+  if (!isForced && now - readAt < FRESH_MS) return
+  // A forced read inside the gap waits for the gap to end instead of dropping.
+  if (now - triedAt < MIN_GAP_MS) {
+    if (isForced) {
+      retry ??= $.clock.after(MIN_GAP_MS - (now - triedAt), () => {
+        retry = undefined
+        refresh($, true).catch(() => {})
+      })
+    }
+    return
+  }
   triedAt = now
   const next = await readMeters($)
   if (next.length === 0) return
   readAt = now
-  const { rateLimits } = now - heardAt < POLL_MS ? await $.session.usage() : { rateLimits: [] }
-  await update($, meters, () => overlay(next, rateLimits))
+  await update($, meters, () => next)
 }
 
 // No measurement follows a compaction, and until the next reply the engine has
@@ -129,18 +140,19 @@ export const register: Register = on => {
   })
 
   // The engine measures only once a turn ends, but each response inside the
-  // turn moves the app's meters. So read the figures after every main-thread
-  // response, without holding the turn up.
+  // turn moves the app's meters. So read the figures after every response, a
+  // subagent's too, without holding the turn up.
   on('turn.step', async function* ($, e, next) {
     const r = yield* next(e)
-    if (e.agentId === undefined && r.usage) $.session.usage().then(u => show($, u)).catch(() => {})
+    if (r.usage) $.session.usage().then(u => show($, u, e.agentId === undefined)).catch(() => {})
     return r
   })
 
+  // A turn ended or a window moved: read what the app's card shows, which
+  // counts every response and the model's weekly window the headers lack.
   on('session.measure', async ($, e, next) => {
-    await show($, e)
-    // The headers carry no model's weekly window, so a fetch fills that in.
-    if (e.changed.includes('rateLimits')) await refresh($, true).catch(() => {})
+    await show($, e, true)
+    await refresh($, true).catch(() => {})
     return next(e)
   })
 

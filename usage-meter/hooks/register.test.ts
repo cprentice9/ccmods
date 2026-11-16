@@ -40,6 +40,7 @@ const engine = (on: On, responses: { status: number; text: string }[], hasTool =
   const clock = mock.clock(on, { now: 1_000_000 })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.compact', () => ({ messages: [SUMMARY] }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('session.usage', (_$, e) => {
     const breakdown = e?.breakdown ? { breakdown: { totalTokens: 30_000 } as never } : {}
     return { value: { startedAt: 0, context: { ...context, ...breakdown }, rateLimits } }
@@ -147,4 +148,21 @@ test('each response inside a turn moves the meters before the turn ends', async 
   // Once the session has been quiet, the next fetch wins over the old headers.
   await clock.advance(5 * 60_000)
   expect(await shows($, ['45%', '28%'])).toEqual(['45%', '28%'])
+})
+
+test('a turn that ends inside the 30-second gap is read once the gap ends', async ($, on) => {
+  const later = { limits: [{ kind: 'session', percent: 47, scope: null }, ...BODY.limits.slice(1)] }
+  const { fetched, clock, rateLimits } = engine(on, [{ status: 200, text: JSON.stringify(BODY) }, { status: 200, text: JSON.stringify(later) }])
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  // Headers that trail the card never pull a meter down.
+  rateLimits.push({ kind: 'five_hour', percentUsed: 44 })
+  await clock.advance(10_000)
+  await $.session.measure({ context: { window: 1_000_000, tokens: 110_000, percent: 11 }, rateLimits, changed: ['cost'] })
+  expect(fetched.length).toBe(1)
+  expect(await shows($, ['45%'])).toEqual(['45%'])
+
+  await clock.advance(20_000)
+  expect(fetched.length).toBe(2)
+  expect(await shows($, ['47%'])).toEqual(['47%'])
 })
