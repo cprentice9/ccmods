@@ -15,7 +15,7 @@ In a terminal session the limits come from the same usage endpoint Claude Code r
 
 The desktop app gives each session a login that can only call the model, and the endpoint refuses it. So in a desktop session the mod reads the limits from the desktop's own usage tool, `get_usage`, which reports the same windows as the app's usage card.
 
-Either way it reads them when the session starts, when Claude Code notices a limit moved, and every five minutes after that. Until the first reading arrives it tries once a minute, and it never asks twice in 30 seconds. The context figure comes from the engine after each turn. A compaction is not a turn, and the engine has no figure for the compacted conversation until the next reply, so in between the row shows the estimate `/context` draws.
+Either way it reads them when the session starts, when Claude Code notices a limit moved, and every five minutes after that. Until the first reading arrives it tries once a minute, and it never asks twice in 30 seconds. Each model response also reports the 5-hour and weekly windows in its headers, and the row takes those as each response lands, so those two move with the app's own meters. A model's weekly window isn't in the headers and waits for the next reading. The context figure also comes from the engine after each response, not just at the end of the turn. A compaction is not a turn, and the engine has no figure for the compacted conversation until the next reply, so in between the row shows the estimate `/context` draws.
 
 With an API key, Bedrock, Vertex or a gateway there are no plan limits, so the row shows the context alone.
 

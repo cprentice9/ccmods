@@ -31,16 +31,18 @@ const SUMMARY = { role: 'user' as const, text: 'Summary of the conversation so f
 // Stands in for the engine beneath the plugin: each fetch answers with the
 // next response, the last one repeating, and the desktop tool is listed only
 // when `hasTool` says so. A test changes `context` to move the engine's figure;
-// /context's estimate is always 30,000 tokens.
+// /context's estimate is always 30,000 tokens. `rateLimits` stands for the
+// windows the last response's headers reported.
 const engine = (on: On, responses: { status: number; text: string }[], hasTool = false) => {
   const fetched: { url: string; auth?: string }[] = []
   const context: { window: number; tokens?: number; percent?: number } = { window: 1_000_000, tokens: 110_000, percent: 11 }
+  const rateLimits: { kind: string; percentUsed: number }[] = []
   const clock = mock.clock(on, { now: 1_000_000 })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.compact', () => ({ messages: [SUMMARY] }))
   on('session.usage', (_$, e) => {
     const breakdown = e?.breakdown ? { breakdown: { totalTokens: 30_000 } as never } : {}
-    return { value: { startedAt: 0, context: { ...context, ...breakdown }, rateLimits: [] } }
+    return { value: { startedAt: 0, context: { ...context, ...breakdown }, rateLimits } }
   })
   on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }))
   on('tool.list', () => ({ value: hasTool ? [{ name: USAGE_TOOL }] : [] }) as never)
@@ -50,8 +52,11 @@ const engine = (on: On, responses: { status: number; text: string }[], hasTool =
     const response = responses[Math.min(fetched.length, responses.length) - 1]!
     return { value: { ...response, ok: response.status === 200, headers: {} } }
   })
+  on('turn.step', async function* (_$: any, e: any) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-fable-5-2' } }
+  } as never)
   on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}) as RenderElement)
-  return { fetched, clock, context }
+  return { fetched, clock, context, rateLimits }
 }
 
 const mount = ($: Engine, surface: RenderSurface) =>
@@ -124,4 +129,22 @@ test('a compaction shows the new size before the next reply', async ($, on) => {
   delete context.percent
   await clock.advance(250)
   expect(await shows($, ['Context', '3%'])).toEqual(['Context', '3%'])
+})
+
+test('each response inside a turn moves the meters before the turn ends', async ($, on) => {
+  const { clock, context, rateLimits } = engine(on, [{ status: 200, text: JSON.stringify(BODY) }])
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  context.percent = 12
+  rateLimits.push({ kind: 'five_hour', percentUsed: 46.4 }, { kind: 'seven_day', percentUsed: 29 })
+  const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-fable-5-2', messageCount: 1 })
+  while (!(await stream.next()).done);
+  await new Promise(r => setTimeout(r, 0))
+
+  // The headers' windows replace the fetched ones; the model's weekly stays.
+  expect(await shows($, ['12%', '46%', '29%', '49%'])).toEqual(['12%', '46%', '29%', '49%'])
+
+  // Once the session has been quiet, the next fetch wins over the old headers.
+  await clock.advance(5 * 60_000)
+  expect(await shows($, ['45%', '28%'])).toEqual(['45%', '28%'])
 })

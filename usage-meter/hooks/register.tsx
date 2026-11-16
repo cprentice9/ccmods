@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, Register, SessionUsage, Timer } from 'claude-code'
 
 import type { UsageMeter } from '../types'
 
@@ -34,6 +34,26 @@ const toolLabel = (text: string) => {
   return model === undefined ? null : model === 'all models' ? 'Weekly' : `${model} weekly`
 }
 
+// The windows each model response reports in its headers, read as the
+// response lands. Other sessions use the same limits, so once this one has
+// been quiet a minute a fetch knows better.
+const KINDS: Record<string, string> = { five_hour: '5-hour', seven_day: 'Weekly' }
+
+const overlay = (rows: UsageMeter[] | null, limits: SessionUsage['rateLimits']) => {
+  const fresh = limits.flatMap(l => (KINDS[l.kind] ? [{ label: KINDS[l.kind]!, percent: l.percentUsed }] : []))
+  if (rows === null) return fresh.length ? fresh : null
+  return rows.map(r => fresh.find(f => f.label === r.label) ?? r)
+}
+
+// Shows the engine's figures as they stand.
+async function show($: EngineInterface, u: Pick<SessionUsage, 'context' | 'rateLimits'>) {
+  const percent = u.context.percent
+  if (percent !== undefined) await update($, context, () => percent)
+  if (!u.rateLimits.length) return
+  heardAt = await $.clock.now()
+  await update($, meters, m => overlay(m, u.rateLimits))
+}
+
 // The app's meter: a gray rounded track with a blue fill inset by 2px that
 // starts as a dot.
 const pill = (percent: number) => {
@@ -63,6 +83,7 @@ async function readMeters($: EngineInterface): Promise<UsageMeter[]> {
 
 let readAt = 0
 let triedAt = 0
+let heardAt = 0
 let timer: Timer | undefined
 
 async function refresh($: EngineInterface, isForced = false) {
@@ -72,7 +93,8 @@ async function refresh($: EngineInterface, isForced = false) {
   const next = await readMeters($)
   if (next.length === 0) return
   readAt = now
-  await update($, meters, () => next)
+  const { rateLimits } = now - heardAt < POLL_MS ? await $.session.usage() : { rateLimits: [] }
+  await update($, meters, () => overlay(next, rateLimits))
 }
 
 // No measurement follows a compaction, and until the next reply the engine has
@@ -106,9 +128,18 @@ export const register: Register = on => {
     return r
   })
 
+  // The engine measures only once a turn ends, but each response inside the
+  // turn moves the app's meters. So read the figures after every main-thread
+  // response, without holding the turn up.
+  on('turn.step', async function* ($, e, next) {
+    const r = yield* next(e)
+    if (e.agentId === undefined && r.usage) $.session.usage().then(u => show($, u)).catch(() => {})
+    return r
+  })
+
   on('session.measure', async ($, e, next) => {
-    const percent = e.context.percent
-    if (percent !== undefined) await update($, context, () => percent)
+    await show($, e)
+    // The headers carry no model's weekly window, so a fetch fills that in.
     if (e.changed.includes('rateLimits')) await refresh($, true).catch(() => {})
     return next(e)
   })
