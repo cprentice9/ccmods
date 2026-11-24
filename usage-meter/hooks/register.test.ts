@@ -59,14 +59,8 @@ const engine = (on: On, responses: { status: number; text: string }[], hasTool =
   on('turn.step', async function* (_$: any, e: any) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-fable-5-2', output_tokens: step.output } }
   } as never)
-  // The suffix the spinner row was last asked to draw.
-  const spinner = { suffix: '' }
-  on('ui.render', ($, e) => {
-    const { suffix } = e.props as { suffix?: string }
-    if (suffix !== undefined) spinner.suffix = suffix
-    return h($.ui.resolve(e).Box, {}) as RenderElement
-  })
-  return { fetched, clock, context, rateLimits, step, spinner }
+  on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}) as RenderElement)
+  return { fetched, clock, context, rateLimits, step }
 }
 
 const respond = async ($: Engine, turnId: string, index: number, agentId?: string) => {
@@ -182,7 +176,7 @@ test('a turn that ends inside the 30-second gap is read once the gap ends', asyn
 })
 
 test('Turn counts the output tokens of the latest turn, subagents included', async ($, on) => {
-  const { step, spinner: drawn } = engine(on, [{ status: 200, text: JSON.stringify(BODY) }])
+  const { step } = engine(on, [{ status: 200, text: JSON.stringify(BODY) }])
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
   const spinner = async (surface: RenderSurface = 'desktop') => {
@@ -193,30 +187,33 @@ test('Turn counts the output tokens of the latest turn, subagents included', asy
       props: { word: 'Working', message: null, suffix: '…', mode: 'responding' },
       viewport: { columns: 160, rows: 40 },
     })
+    // The count the mod draws after the engine's row, and its arrow's color.
+    const arrow = await ui.find({ type: 'Text', text: '↓' })
+    const count = (await ui.findAll({ type: 'Text' })).find(t => t.text?.endsWith(' tokens'))?.text
     await ui.unmount()
-    return drawn.suffix
+    return [arrow?.props.color, count]
   }
 
   // Nothing generated yet: the row is the engine's.
   await $.turn.start({ text: 'hi', turnId: 't1' })
-  expect(await spinner()).toBe('…')
+  expect(await spinner()).toEqual([undefined, undefined])
 
   step.output = 800
   await respond($, 't1', 0)
-  expect(await spinner()).toBe('… ↓ 800 tokens')
+  expect(await spinner()).toEqual(['claude', '800 tokens'])
 
   step.output = 3_450
   await respond($, 't1', 1)
   await $.turn.start({ text: 'go', turnId: 's1', agentId: 'a1' })
   step.output = 1_000
   await respond($, 's1', 0, 'a1')
-  expect(await spinner()).toBe('… ↓ 5.3k tokens')
+  expect(await spinner()).toEqual(['claude', '5.3k tokens'])
 
   // The terminal's spinner counts tokens itself, and the bar has no Turn cell.
-  expect(await spinner('terminal')).toBe('…')
+  expect(await spinner('terminal')).toEqual([undefined, undefined])
   expect(await shows($, ['Turn'])).toEqual([undefined])
 
   // The next main turn starts over.
   await $.turn.start({ text: 'again', turnId: 't2' })
-  expect(await spinner()).toBe('…')
+  expect(await spinner()).toEqual([undefined, undefined])
 })
