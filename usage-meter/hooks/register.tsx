@@ -202,19 +202,10 @@ export const register: Register = on => {
   })
 
   // The terminal's spinner counts tokens itself; the desktop's row does not,
-  // so the turn's count goes after the row, its arrow in Claude's orange.
+  // so the turn's count goes after its words.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
     const spent = await read($, turn)
     if (e.surface !== 'desktop' || !spent) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
-    return (
-      <Box alignItems="center" gap="xs">
-        {await next(e)}
-        <Text color="claude">↓</Text>
-        <Text dimColor tabular>
-          {tokens(spent)} tokens
-        </Text>
-      </Box>
-    )
+    return next({ ...e, props: { ...e.props, suffix: `${e.props.suffix} ↓ ${tokens(spent)} tokens` } })
   })
 }
