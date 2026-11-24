@@ -9,7 +9,7 @@ A row above the prompt with your plan limits and the session's context.
 
 Each meter is centered in an equal share of the row's width, a quarter with four. In the desktop app each percentage has a small meter beside it, drawn like the context meter in the app's environment menu. Terminals show the percentages alone.
 
-In the desktop app the row that says what a running turn is doing also shows the output tokens the turn has generated so far, its subagents' included: `Working… ↓ 5.3k tokens`. It counts output only, as the terminal's spinner does, because every response resends the whole conversation as input. The count starts over at your next prompt.
+In the desktop app the row that says what a running turn is doing also shows the output tokens the turn has generated so far, its subagents' included: `Working… ↓ 5.3k tokens`. It counts output only, as the terminal's spinner does, because every response resends the whole conversation as input. While a response streams, the count climbs on an estimate, a token for every four characters, and the response's own count replaces the estimate when it lands. The count starts over at your next prompt. While a message you typed over a running turn is waiting, the app's row adds a token count of its own beside the mod's.
 
 ## Where the numbers come from
 

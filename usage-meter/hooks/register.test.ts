@@ -54,9 +54,11 @@ const engine = (on: On, responses: { status: number; text: string }[], hasTool =
     return { value: { ...response, ok: response.status === 200, headers: {} } }
   })
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
-  // Each response reports `step.output` output tokens.
-  const step = { output: 0 }
+  // Each response streams `step.text` as one piece, then reports
+  // `step.output` output tokens.
+  const step = { output: 0, text: '' }
   on('turn.step', async function* (_$: any, e: any) {
+    if (step.text) yield { kind: 'text', index: 0, text: step.text }
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-fable-5-2', output_tokens: step.output } }
   } as never)
   // The suffix the spinner row was last asked to draw.
@@ -185,12 +187,12 @@ test('Turn counts the output tokens of the latest turn, subagents included', asy
   const { step, spinner: drawn } = engine(on, [{ status: 200, text: JSON.stringify(BODY) }])
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
-  const spinner = async (surface: RenderSurface = 'desktop') => {
+  const spinner = async (surface: RenderSurface = 'desktop', suffix = '…') => {
     const ui = await $.ui.mount({
       plugin: 'usage-meter',
       surface,
       component: 'Spinner',
-      props: { word: 'Working', message: null, suffix: '…', mode: 'responding' },
+      props: { word: 'Working', message: null, suffix, mode: 'responding' },
       viewport: { columns: 160, rows: 40 },
     })
     await ui.unmount()
@@ -211,6 +213,21 @@ test('Turn counts the output tokens of the latest turn, subagents included', asy
   step.output = 1_000
   await respond($, 's1', 0, 'a1')
   expect(await spinner()).toBe('… ↓ 5.3k tokens')
+
+  // A suffix that comes back with an earlier count on it gets one count, not two.
+  expect(await spinner('desktop', '… ↓ 4.1k tokens')).toBe('… ↓ 5.3k tokens')
+
+  // While a response streams, the count climbs on an estimate: a token for
+  // every four characters. The response's own count replaces it at the end.
+  step.text = 'x'.repeat(1_000)
+  step.output = 350
+  const stream = $.turn.step({ turnId: 't1', index: 2, model: 'claude-fable-5-2', messageCount: 1 })
+  await stream.next()
+  await new Promise(r => setTimeout(r, 0))
+  expect(await spinner()).toBe('… ↓ 5.5k tokens')
+  while (!(await stream.next()).done);
+  expect(await spinner()).toBe('… ↓ 5.6k tokens')
+  step.text = ''
 
   // The terminal's spinner counts tokens itself, and the bar has no Turn cell.
   expect(await spinner('terminal')).toBe('…')

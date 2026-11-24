@@ -12,6 +12,8 @@ const USAGE_TOOL = 'mcp__ccd_session_mgmt__get_usage'
 const POLL_MS = 60_000
 const FRESH_MS = 5 * 60_000
 const MIN_GAP_MS = 30_000
+// The turn's count moves once the estimate is this many tokens ahead of it.
+const LIVE_STEP = 10
 // The blue of the desktop app's own context meter.
 const BLUE = '#2f7cf6'
 
@@ -20,6 +22,8 @@ const context = atom({ plugin: 'usage-meter', key: 'context' } as const, null)
 // Output tokens of the latest turn, its subagents' included.
 const turn = atom({ plugin: 'usage-meter', key: 'turn' } as const, null)
 
+// A count as the working row carries it: ` ↓ 800 tokens`, ` ↓ 5.3k tokens`.
+const COUNT = / ↓ [\d.]+k? tokens/g
 const tokens = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`)
 
 type Limit = { kind: string; percent: number; scope?: { model?: { display_name?: string | null } | null } | null }
@@ -152,9 +156,26 @@ export const register: Register = on => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    const r = yield* next(e)
+    // The API counts a response's tokens once it is whole. Until then the
+    // count climbs on an estimate, a token for every four characters streamed,
+    // and the response's own count replaces the estimate when it lands.
+    let chars = 0
+    let added = 0
+    const add = (n: number) => {
+      added += n
+      return update($, turn, t => (t ?? 0) + n)
+    }
+    const stream = next(e)
+    for await (const c of stream) {
+      if (c.kind === 'text' || c.kind === 'thinking') chars += c.text.length
+      else if (c.kind === 'input') chars += c.json.length
+      const ahead = Math.floor(chars / 4) - added
+      if (ahead >= LIVE_STEP) add(ahead).catch(() => {})
+      yield c
+    }
+    const r = await stream.result
     const output = r.usage?.output_tokens
-    if (output) await update($, turn, n => (n ?? 0) + output)
+    if (output !== undefined && output !== added) await add(output - added)
     if (r.usage) $.session.usage().then(u => show($, u, e.agentId === undefined)).catch(() => {})
     return r
   })
@@ -206,6 +227,9 @@ export const register: Register = on => {
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
     const spent = await read($, turn)
     if (e.surface !== 'desktop' || !spent) return next(e)
-    return next({ ...e, props: { ...e.props, suffix: `${e.props.suffix} ↓ ${tokens(spent)} tokens` } })
+    // The app can hand back a suffix that already carries an earlier count,
+    // so that one comes off before the new one goes on.
+    const suffix = e.props.suffix.replace(COUNT, '')
+    return next({ ...e, props: { ...e.props, suffix: `${suffix} ↓ ${tokens(spent)} tokens` } })
   })
 }
