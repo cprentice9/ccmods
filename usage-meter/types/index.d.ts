@@ -8,6 +8,8 @@ declare module 'claude-code' {
       meters: UsageMeter[] | null
       /** The context window's fill, 0 to 100; null before the first response. */
       context: number | null
+      /** Output tokens of the latest turn, its subagents' included; null before the first turn. */
+      turn: number | null
     }
   }
 }

@@ -17,6 +17,10 @@ const BLUE = '#2f7cf6'
 
 const meters = atom({ plugin: 'usage-meter', key: 'meters' } as const, null)
 const context = atom({ plugin: 'usage-meter', key: 'context' } as const, null)
+// Output tokens of the latest turn, its subagents' included.
+const turn = atom({ plugin: 'usage-meter', key: 'turn' } as const, null)
+
+const tokens = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`)
 
 type Limit = { kind: string; percent: number; scope?: { model?: { display_name?: string | null } | null } | null }
 
@@ -142,8 +146,15 @@ export const register: Register = on => {
   // The engine measures only once a turn ends, but each response inside the
   // turn moves the app's meters. So read the figures after every response, a
   // subagent's too, without holding the turn up.
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) await update($, turn, () => 0)
+    return next(e)
+  })
+
   on('turn.step', async function* ($, e, next) {
     const r = yield* next(e)
+    const output = r.usage?.output_tokens
+    if (output) await update($, turn, n => (n ?? 0) + output)
     if (r.usage) $.session.usage().then(u => show($, u, e.agentId === undefined)).catch(() => {})
     return r
   })
@@ -188,5 +199,13 @@ export const register: Register = on => {
         {rows.map(m => meter(m.label, m.percent))}
       </Box>
     )
+  })
+
+  // The terminal's spinner counts tokens itself; the desktop's row does not,
+  // so the turn's count goes after its words.
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    const spent = await read($, turn)
+    if (e.surface !== 'desktop' || !spent) return next(e)
+    return next({ ...e, props: { ...e.props, suffix: `${e.props.suffix} ↓ ${tokens(spent)} tokens` } })
   })
 }

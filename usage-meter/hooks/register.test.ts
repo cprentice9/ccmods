@@ -53,11 +53,25 @@ const engine = (on: On, responses: { status: number; text: string }[], hasTool =
     const response = responses[Math.min(fetched.length, responses.length) - 1]!
     return { value: { ...response, ok: response.status === 200, headers: {} } }
   })
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  // Each response reports `step.output` output tokens.
+  const step = { output: 0 }
   on('turn.step', async function* (_$: any, e: any) {
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-fable-5-2' } }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-fable-5-2', output_tokens: step.output } }
   } as never)
-  on('ui.render', ($, e) => h($.ui.resolve(e).Box, {}) as RenderElement)
-  return { fetched, clock, context, rateLimits }
+  // The suffix the spinner row was last asked to draw.
+  const spinner = { suffix: '' }
+  on('ui.render', ($, e) => {
+    const { suffix } = e.props as { suffix?: string }
+    if (suffix !== undefined) spinner.suffix = suffix
+    return h($.ui.resolve(e).Box, {}) as RenderElement
+  })
+  return { fetched, clock, context, rateLimits, step, spinner }
+}
+
+const respond = async ($: Engine, turnId: string, index: number, agentId?: string) => {
+  const stream = $.turn.step({ turnId, index, model: 'claude-fable-5-2', messageCount: 1, agentId })
+  while (!(await stream.next()).done);
 }
 
 const mount = ($: Engine, surface: RenderSurface) =>
@@ -165,4 +179,44 @@ test('a turn that ends inside the 30-second gap is read once the gap ends', asyn
   await clock.advance(20_000)
   expect(fetched.length).toBe(2)
   expect(await shows($, ['47%'])).toEqual(['47%'])
+})
+
+test('Turn counts the output tokens of the latest turn, subagents included', async ($, on) => {
+  const { step, spinner: drawn } = engine(on, [{ status: 200, text: JSON.stringify(BODY) }])
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  const spinner = async (surface: RenderSurface = 'desktop') => {
+    const ui = await $.ui.mount({
+      plugin: 'usage-meter',
+      surface,
+      component: 'Spinner',
+      props: { word: 'Working', message: null, suffix: '…', mode: 'responding' },
+      viewport: { columns: 160, rows: 40 },
+    })
+    await ui.unmount()
+    return drawn.suffix
+  }
+
+  // Nothing generated yet: the row is the engine's.
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  expect(await spinner()).toBe('…')
+
+  step.output = 800
+  await respond($, 't1', 0)
+  expect(await spinner()).toBe('… ↓ 800 tokens')
+
+  step.output = 3_450
+  await respond($, 't1', 1)
+  await $.turn.start({ text: 'go', turnId: 's1', agentId: 'a1' })
+  step.output = 1_000
+  await respond($, 's1', 0, 'a1')
+  expect(await spinner()).toBe('… ↓ 5.3k tokens')
+
+  // The terminal's spinner counts tokens itself, and the bar has no Turn cell.
+  expect(await spinner('terminal')).toBe('…')
+  expect(await shows($, ['Turn'])).toEqual([undefined])
+
+  // The next main turn starts over.
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  expect(await spinner()).toBe('…')
 })
